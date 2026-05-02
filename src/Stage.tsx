@@ -571,14 +571,15 @@ render(): ReactElement {
     const [trigger, setTrigger] = useState(this.myInternalState['renderTrigger']);
     this.myInternalState['setRenderTrigger'] = setTrigger;
 
-    return <div style={{
+      return <div style={{
         width: '100%',
+        minHeight: '100vh',
         padding: '12px',
         fontFamily: 'system-ui, sans-serif',
         color: '#e0e0e0',
         background: 'rgba(20, 20, 30, 0.85)',
-        borderRadius: '8px',
-        boxSizing: 'border-box'
+        boxSizing: 'border-box',
+        overflowY: 'auto'
     }}>
 {(() => {
     const loc: Location = this.myInternalState['currentLocation'];
