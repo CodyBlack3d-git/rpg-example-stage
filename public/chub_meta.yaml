@@ -1,3 +1,14 @@
+project_name: "rpg-stats-tracker"
+name: "RPG Stats & Companions"
+tagline: "Tracks player stats, inventory, companions, and location for tabletop-style adventures."
+description: "A stage for RPG-themed chats. Displays a current-location image, player stats panel (HP, MP, level, XP, gold, inventory), and active companion portraits with mood-based expressions. The AI controls state changes via tagged updates in its responses."
+creator_notes: "Best paired with a system prompt instructing the AI to act as a fair GM and emit state update blocks. Companions and locations are predefined in the stage code; the AI can add text-only newcomers on the fly."
+tags:
+  - rpg
+  - stats
+  - companions
+  - tabletop
+github: github.com/CodyBlack3d-git/rpg-example-stage
 # All of these fields are optional, as is this file itself,
 #   in which case these values can be managed in the UI.
 
