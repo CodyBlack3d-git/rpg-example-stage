@@ -11,7 +11,20 @@ import {LoadResponse} from "@chub-ai/stages-ts/dist/types/load";
   but not for things like history, which is best managed ephemerally
   in the internal state of the Stage class itself.
  ***/
-type MessageStateType = any;
+type PlayerStats = {
+    hp: number;
+    maxHp: number;
+    mp: number;
+    maxMp: number;
+    level: number;
+    xp: number;
+    gold: number;
+    inventory: string[];
+};
+
+type MessageStateType = {
+    player: PlayerStats;
+};
 
 /***
  The type of the stage-specific configuration of this stage.
@@ -71,9 +84,22 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             initState,                             // @type: null | InitStateType
             chatState                              // @type: null | ChatStateType
         } = data;
-        this.myInternalState = messageState != null ? messageState : {'someKey': 'someValue'};
-        this.myInternalState['numUsers'] = Object.keys(users).length;
-        this.myInternalState['numChars'] = Object.keys(characters).length;
+        const defaultPlayer: PlayerStats = {
+    hp: 20,
+    maxHp: 20,
+    mp: 10,
+    maxMp: 10,
+    level: 1,
+    xp: 0,
+    gold: 50,
+    inventory: ['Rusty sword', 'Leather armor', 'Healing potion']
+};
+
+this.myInternalState = {
+    player: messageState?.player ?? defaultPlayer,
+    numUsers: Object.keys(users).length,
+    numChars: Object.keys(characters).length
+};
     }
 
     async load(): Promise<Partial<LoadResponse<InitStateType, ChatStateType, MessageStateType>>> {
@@ -126,7 +152,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
              but that isn't persisted. ***/
             stageDirections: null,
             /*** @type MessageStateType | null @description the new state after the userMessage. ***/
-            messageState: {'someKey': this.myInternalState['someKey']},
+            messageState: { player: this.myInternalState['player'] },
             /*** @type null | string @description If not null, the user's message itself is replaced
              with this value, both in what's sent to the LLM and in the database. ***/
             modifiedMessage: null,
@@ -162,7 +188,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
              but that isn't persisted. ***/
             stageDirections: null,
             /*** @type MessageStateType | null @description the new state after the botMessage. ***/
-            messageState: {'someKey': this.myInternalState['someKey']},
+            messageState: { player: this.myInternalState['player'] },
             /*** @type null | string @description If not null, the bot's response itself is replaced
              with this value, both in what's sent to the LLM subsequently and in the database. ***/
             modifiedMessage: null,
@@ -174,32 +200,45 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         };
     }
 
+render(): ReactElement {
+    const player: PlayerStats = this.myInternalState['player'];
 
-    render(): ReactElement {
-        /***
-         There should be no "work" done here. Just returning the React element to display.
-         If you're unfamiliar with React and prefer video, I've heard good things about
-         @link https://scrimba.com/learn/learnreact but haven't personally watched/used it.
-
-         For creating 3D and game components, react-three-fiber
-           @link https://docs.pmnd.rs/react-three-fiber/getting-started/introduction
-           and the associated ecosystem of libraries are quite good and intuitive.
-
-         Cuberun is a good example of a game built with them.
-           @link https://github.com/akarlsten/cuberun (Source)
-           @link https://cuberun.adamkarlsten.com/ (Demo)
-         ***/
-        return <div style={{
-            width: '100vw',
-            height: '100vh',
-            display: 'grid',
-            alignItems: 'stretch'
+    return <div style={{
+        width: '100%',
+        padding: '12px',
+        fontFamily: 'system-ui, sans-serif',
+        color: '#e0e0e0',
+        background: 'rgba(20, 20, 30, 0.85)',
+        borderRadius: '8px',
+        boxSizing: 'border-box'
+    }}>
+        <div style={{
+            fontSize: '14px',
+            fontWeight: 'bold',
+            marginBottom: '8px',
+            borderBottom: '1px solid #444',
+            paddingBottom: '4px'
         }}>
-            <div>Hello World! I'm an empty stage! With {this.myInternalState['someKey']}!</div>
-            <div>There is/are/were {this.myInternalState['numChars']} character(s)
-                and {this.myInternalState['numUsers']} human(s) here.
-            </div>
-        </div>;
-    }
+            Player Status
+        </div>
+
+        <div style={{display: 'flex', gap: '16px', flexWrap: 'wrap', marginBottom: '8px'}}>
+            <div>HP: <span style={{color: '#ff6b6b'}}>{player.hp}/{player.maxHp}</span></div>
+            <div>MP: <span style={{color: '#6bb6ff'}}>{player.mp}/{player.maxMp}</span></div>
+            <div>Lvl: <span style={{color: '#ffd56b'}}>{player.level}</span></div>
+            <div>XP: {player.xp}</div>
+            <div>Gold: <span style={{color: '#ffd56b'}}>{player.gold}</span></div>
+        </div>
+
+        <div>
+            <div style={{fontSize: '12px', color: '#aaa', marginBottom: '4px'}}>Inventory</div>
+            {player.inventory.length === 0
+                ? <div style={{fontStyle: 'italic', color: '#777'}}>(empty)</div>
+                : <ul style={{margin: 0, paddingLeft: '20px'}}>
+                    {player.inventory.map((item, i) => <li key={i}>{item}</li>)}
+                </ul>}
+        </div>
+    </div>;
+}
 
 }
