@@ -1,4 +1,4 @@
-import {ReactElement, useState, useEffect} from "react";
+import {ReactElement} from "react";
 import {StageBase, StageResponse, InitialData, Message} from "@chub-ai/stages-ts";
 import {LoadResponse} from "@chub-ai/stages-ts/dist/types/load";
 
@@ -169,9 +169,7 @@ this.myInternalState = {
     currentLocation: messageState?.currentLocation ?? knownLocations.tavern,
     knownLocations: knownLocations,
     numUsers: Object.keys(users).length,
-    numChars: Object.keys(characters).length,
-    renderTrigger: 0,
-    setRenderTrigger: null as null | ((n: number) => void)
+    numChars: Object.keys(characters).length
 };
     }
 
@@ -568,8 +566,6 @@ applyLocationChange(nameOrId: string): void {
 
 render(): ReactElement {
     const player: PlayerStats = this.myInternalState['player'];
-    const [trigger, setTrigger] = useState(this.myInternalState['renderTrigger']);
-    this.myInternalState['setRenderTrigger'] = setTrigger;
 
       return <div style={{
         width: '100%',
@@ -703,8 +699,9 @@ render(): ReactElement {
     console.log('Cleaned text:', result.cleanedText);
     console.log('New state:', this.myInternalState);
 
-    this.myInternalState['renderTrigger']++;
-    this.myInternalState['setRenderTrigger']?.(this.myInternalState['renderTrigger']);
+    // Force a re-render. In production this happens automatically;
+    // in dev/test we just nudge by reassigning state.
+    this.myInternalState = {...this.myInternalState};
 }}
 >
         Simulate combat
