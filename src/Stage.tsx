@@ -113,13 +113,13 @@ const companionRoster: {[id: string]: Companion} = {
         name: 'Niri',
         mood: 'neutral',
         moodImages: {
-            neutral: '/character/niri_neutral.gif',
-            happy: '/character/niri_happy.gif',
-            exhausted: '/character/niri_exhausted.gif',
-            flustered: '/character/niri_flustered.gif',
-            satisfied: '/character/niri_satisfied.gif',
-            embarrassed: '/character/niri_embarrassed.gif',
-            flirty: '/character/niri_flirty.gif'
+            neutral: '/characters/Niri_Neutral.gif',
+            happy: '/characters/Niri_Happy.gif',
+            exhausted: '/characters/Niri_Exhausted.gif',
+            flustered: '/characters/Niri_Flustered.gif',
+            satisfied: '/characters/Niri_Satisfied.gif',
+            embarrassed: '/characters/Niri_Embarrassed.gif',
+            flirty: '/characters/Niri_Flirty.gif'
         },
         description: 'A Halcyne Mystic. Naive but loyal.',
         isRoster: true
@@ -699,9 +699,8 @@ render(): ReactElement {
     console.log('Cleaned text:', result.cleanedText);
     console.log('New state:', this.myInternalState);
 
-    // Force a re-render. In production this happens automatically;
-    // in dev/test we just nudge by reassigning state.
-    this.myInternalState = {...this.myInternalState};
+    // Reload the page to pick up state changes in dev.
+    window.location.reload();
 }}
 >
         Simulate combat
