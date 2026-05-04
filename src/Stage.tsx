@@ -78,7 +78,7 @@ type ChatStateType = any;
  ***/
 // Set to true while developing in the test runner.
 // MUST be false before deploying to Chub.
-const DEV_MODE = false;
+const DEV_MODE = true;
  export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateType, ConfigType> {
 
     /***
@@ -113,13 +113,13 @@ const companionRoster: {[id: string]: Companion} = {
         name: 'Niri',
         mood: 'neutral',
         moodImages: {
-            neutral: this.placeholderImage('Niri', 'neutral', '#6b8eaa'),
-            happy: this.placeholderImage('Niri', 'happy', '#aac46b'),
-            exhausted: this.placeholderImage('Niri', 'exhausted', '#7a6b8e'),
-            flustered: this.placeholderImage('Niri', 'flustered', '#d68fa8'),
-            satisfied: this.placeholderImage('Niri', 'satisfied', '#c4a86b'),
-            embarrassed: this.placeholderImage('Niri', 'embarrassed', '#e08a8a'),
-            flirty: this.placeholderImage('Niri', 'flirty', '#c46baa')
+            neutral: '/character/niri_neutral.gif',
+            happy: '/character/niri_happy.gif',
+            exhausted: '/character/niri_exhausted.gif',
+            flustered: '/character/niri_flustered.gif',
+            satisfied: '/character/niri_satisfied.gif',
+            embarrassed: '/character/niri_embarrassed.gif',
+            flirty: '/character/niri_flirty.gif'
         },
         description: 'A Halcyne Mystic. Naive but loyal.',
         isRoster: true
@@ -129,21 +129,21 @@ const knownLocations: {[id: string]: Location} = {
     tavern: {
         id: 'tavern',
         name: 'The Drunken Griffon',
-        image: this.locationPlaceholder('The Drunken Griffon', '#8b6f47', '#3a2818'),
+        image: '/Locations/loc_tavern.png',
         description: 'A warm, smoky tavern in the heart of town.',
         isKnown: true
     },
     forest: {
         id: 'forest',
         name: 'Whispering Woods',
-        image: this.locationPlaceholder('Whispering Woods', '#3d5e3a', '#1a2818'),
+        image: '/Locations/loc_forest.png',
         description: 'An ancient forest where the trees seem to murmur.',
         isKnown: true
     },
     road: {
         id: 'road',
         name: 'The King\'s Road',
-        image: this.locationPlaceholder('The King\'s Road', '#9a8a6a', '#5a4f3a'),
+        image: '/Locations/loc_road.png',
         description: 'A wide, well-traveled trade road.',
         isKnown: true
     }
