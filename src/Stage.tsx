@@ -55,6 +55,11 @@ type RollState =
     | {kind: 'pending'; request: RollRequest}
     | {kind: 'resolved'; result: RollResult};
 
+type SocialUnlock = {
+    bondLevel: number;     // 1-10, the level at which this unlock becomes available
+    description: string;   // narrative hint shown to the AI when bond is >= this level
+};
+
 type Companion = {
     id: string;
     name: string;
@@ -63,6 +68,22 @@ type Companion = {
     description?: string;
     isRoster: boolean;
     abilities?: AbilityScores;  // optional — text-only newcomers don't need them
+    bondLevel?: number;         // 0-10; defaults to 0
+    bondProgress?: number;      // points accumulated toward next level
+    socialUnlocks?: SocialUnlock[];  // narrative beats keyed to bond level
+};
+
+// Cumulative cost to reach each bond level. Index 0 = cost to reach level 1.
+// Total to max bond (10): 144 points.
+const BOND_LEVEL_COSTS: number[] = [5, 6, 8, 9, 11, 14, 17, 20, 24, 30];
+
+// Bond event types and the points they award. The AI selects from this list
+// when emitting [BOND: ...] tags. Progress-only — no events reduce bond.
+const BOND_EVENT_VALUES: {[event: string]: number} = {
+    personal_moment: 1,    // sharing a meal, quiet conversation, asking about their past
+    quest_assist: 1,       // companion was meaningfully helpful toward a player goal
+    defending: 2,          // taking a hit, standing up for them, prioritizing their safety
+    personal_sacrifice: 2  // giving them something valuable, sharing reward to favor them
 };
 
 type Location = {
@@ -174,7 +195,14 @@ const companionRoster: {[id: string]: Companion} = {
             int: 14,
             wis: 16,
             cha: 13
-        }
+        },
+        bondLevel: 0,
+        bondProgress: 0,
+        socialUnlocks: [
+            // Fill these in later. Example shape:
+            // { bondLevel: 2, description: "Niri shares the name of her home village." },
+            // { bondLevel: 4, description: "Niri starts using a private nickname for the player." }
+        ]
     }
 };
 const knownLocations: {[id: string]: Location} = {
@@ -245,7 +273,10 @@ const mergedCompanions: Companion[] = savedCompanions
             abilities: c.abilities ?? fromRoster.abilities,
             moodImages: c.moodImages && Object.keys(c.moodImages).length > 0
                 ? c.moodImages
-                : fromRoster.moodImages
+                : fromRoster.moodImages,
+            bondLevel: c.bondLevel ?? 0,
+            bondProgress: c.bondProgress ?? 0,
+            socialUnlocks: c.socialUnlocks ?? fromRoster.socialUnlocks ?? []
         };
     })
     : defaultActiveCompanions;
@@ -441,7 +472,15 @@ formatStatsForPrompt(): string {
             const abilityStr = c.abilities
                 ? ` | STR ${c.abilities.str} (${this.formatModifier(c.abilities.str)}), DEX ${c.abilities.dex} (${this.formatModifier(c.abilities.dex)}), CON ${c.abilities.con} (${this.formatModifier(c.abilities.con)}), INT ${c.abilities.int} (${this.formatModifier(c.abilities.int)}), WIS ${c.abilities.wis} (${this.formatModifier(c.abilities.wis)}), CHA ${c.abilities.cha} (${this.formatModifier(c.abilities.cha)})`
                 : '';
-            return `- ${c.name} (id: ${c.id}, mood: ${c.mood})${abilityStr}`;
+            const bondStr = c.isRoster
+                ? ` | bond: ${c.bondLevel ?? 0}/10 (${c.bondProgress ?? 0}/${BOND_LEVEL_COSTS[c.bondLevel ?? 0] ?? '—'})`
+                : '';
+            // Filter unlocks to ones the companion has reached.
+            const unlocks = (c.socialUnlocks ?? []).filter(u => u.bondLevel <= (c.bondLevel ?? 0));
+            const unlocksStr = unlocks.length > 0
+                ? `\n  Unlocked beats: ${unlocks.map(u => `(L${u.bondLevel}) ${u.description}`).join('; ')}`
+                : '';
+            return `- ${c.name} (id: ${c.id}, mood: ${c.mood})${abilityStr}${bondStr}${unlocksStr}`;
         }).join('\n');
 
     const validMoods = ['neutral', 'happy', 'exhausted', 'flustered', 'satisfied', 'embarrassed', 'flirty'];
@@ -497,6 +536,19 @@ Companion rules:
 - Valid moods for Niri: ${validMoods.join(', ')}
 - To add a companion: companion+=<Name>. To remove: companion-=<id or name>.
 
+Bond rules:
+- Bond is per-companion, 0-10. It only goes up, never down.
+- Award bond on its own line via: [BOND: <id>+=<amount>, reason=<event>]
+- Valid events and their amounts:
+  * personal_moment (+1): sharing a meal, quiet conversation, asking about their past
+  * quest_assist (+1): companion was meaningfully helpful toward a player goal
+  * defending (+2): player took a hit for them, stood up for them, prioritized their safety
+  * personal_sacrifice (+2): player gave them something valuable, shared a reward in their favor
+- Award bond sparingly. One bond event per response, at most. Only emit when a meaningful moment actually occurred — not for every kind word.
+- Do NOT award bond for casual greetings, mundane interactions, or doing things companions would do anyway.
+- Award the lower amount when in doubt; the system rewards consistent care over time.
+- When a companion has unlocked social beats (shown in the ACTIVE COMPANIONS block), naturally weave them into your narration — share the detail, use the nickname, etc. The unlock is permission, not obligation; let it happen organically.
+
 Location rules:
 - To change location, use location=<id or display name>. If it matches a known location id or name, full details are used. Otherwise it's treated as a new unknown place.
 - Only emit location= when the party actually moves to a new place. Don't emit it for stays.
@@ -533,12 +585,55 @@ General rules:
         workingText = workingText.replace(rollRegex, '').trim();
     }
 
+    // Strip and apply any bond tags. Format: [BOND: niri+=1, reason=quest_assist]
+    // Multiple companions can be in one tag, comma-separated.
+    const bondRegex = /\[BOND:([^\]]*)\]/gi;
+    let bondMatch: RegExpExecArray | null;
+    let appliedBond = false;
+    const bondMatches: string[] = [];
+    while ((bondMatch = bondRegex.exec(workingText)) !== null) {
+        bondMatches.push(bondMatch[0]);
+        const bondContent = bondMatch[1].trim();
+        const parts = bondContent.split(',').map(s => s.trim()).filter(s => s.length > 0);
+        // Parse fields. We expect exactly one companion+=N and exactly one reason=...
+        let companionId: string | null = null;
+        let amount: number = 0;
+        let reason: string = '';
+        for (const p of parts) {
+            const addMatch = p.match(/^(\w+)\s*\+=\s*(\d+)$/);
+            if (addMatch) {
+                companionId = addMatch[1].toLowerCase();
+                amount = parseInt(addMatch[2], 10);
+                continue;
+            }
+            const reasonMatch = p.match(/^reason\s*=\s*(.+)$/i);
+            if (reasonMatch) {
+                reason = reasonMatch[1].trim().toLowerCase();
+                continue;
+            }
+        }
+        if (companionId && amount > 0) {
+            // Validate reason against allowed event values; if unknown, still apply but warn.
+            if (!(reason in BOND_EVENT_VALUES)) {
+                console.warn(`Stage: unknown bond reason "${reason}", applying anyway`);
+            }
+            this.applyBondProgress(companionId, amount, reason);
+            appliedBond = true;
+        } else {
+            console.warn('Stage: malformed BOND tag:', bondContent);
+        }
+    }
+    // Strip all bond tags from working text after processing.
+    for (const tag of bondMatches) {
+        workingText = workingText.replace(tag, '').trim();
+    }
+
     // Then: find the state block in the (possibly stripped) text.
     const stateRegex = /\[STATE:([^\]]*)\]/i;
     const match = workingText.match(stateRegex);
 
     if (!match) {
-        return {cleanedText: workingText, applied: appliedRoll};
+        return {cleanedText: workingText, applied: appliedRoll || appliedBond};
     }
 
     const stateContent = match[1].trim();
@@ -706,6 +801,38 @@ applyCompanionRemove(nameOrId: string): void {
         return;
     }
     this.myInternalState['activeCompanions'] = filtered;
+}
+
+applyBondProgress(id: string, amount: number, reason: string): void {
+    const companions: Companion[] = this.myInternalState['activeCompanions'];
+    const target = companions.find(c => c.id === id);
+    if (!target) {
+        console.warn(`Stage: tried to add bond for unknown companion "${id}"`);
+        return;
+    }
+    if (!target.isRoster) {
+        console.warn(`Stage: companion "${target.name}" is text-only, no bond tracking`);
+        return;
+    }
+    if (amount <= 0) {
+        console.warn(`Stage: bond progress must be positive (got ${amount})`);
+        return;
+    }
+
+    const currentLevel = target.bondLevel ?? 0;
+    let progress = (target.bondProgress ?? 0) + amount;
+    let level = currentLevel;
+
+    // Level up if progress meets or exceeds the cost to next level.
+    while (level < BOND_LEVEL_COSTS.length && progress >= BOND_LEVEL_COSTS[level]) {
+        progress -= BOND_LEVEL_COSTS[level];
+        level++;
+    }
+
+    target.bondLevel = level;
+    target.bondProgress = progress;
+    console.log(`Stage: ${target.name} +${amount} bond (${reason}). Now level ${level}, ${progress}/${BOND_LEVEL_COSTS[level] ?? '—'} to next.`);
+    this.myInternalState['activeCompanions'] = [...companions];
 }
 applyLocationChange(nameOrId: string): void {
     const known: {[id: string]: Location} = this.myInternalState['knownLocations'];
@@ -1093,6 +1220,33 @@ renderInner(): ReactElement {
                     )}
                     <div style={{fontSize: '13px', marginTop: '4px', fontWeight: 'bold'}}>{c.name}</div>
                     <div style={{fontSize: '11px', color: '#aaa'}}>{c.mood}</div>
+                    {c.isRoster && (() => {
+                        const lvl = c.bondLevel ?? 0;
+                        const prog = c.bondProgress ?? 0;
+                        const cost = BOND_LEVEL_COSTS[lvl];
+                        const pct = cost ? Math.min(100, (prog / cost) * 100) : 100;
+                        return (
+                            <div style={{marginTop: '4px', textAlign: 'left'}}>
+                                <div style={{fontSize: '10px', color: '#888', marginBottom: '2px'}}>
+                                    Bond {lvl}/10 {cost ? `(${prog}/${cost})` : '(max)'}
+                                </div>
+                                <div style={{
+                                    height: '4px',
+                                    width: '100%',
+                                    background: '#222',
+                                    borderRadius: '2px',
+                                    overflow: 'hidden'
+                                }}>
+                                    <div style={{
+                                        height: '100%',
+                                        width: `${pct}%`,
+                                        background: lvl >= 10 ? '#ffd56b' : '#7aaeff',
+                                        transition: 'width 0.3s'
+                                    }}/>
+                                </div>
+                            </div>
+                        );
+                    })()}
                 </div>
             ))}
         </div>
@@ -1116,7 +1270,9 @@ renderInner(): ReactElement {
         `The path leads you back to the road. [STATE: location=The King's Road]`,
         `You arrive at a strange ruin you've never seen before. [STATE: location=The Sunken Tower]`,
         `You return to the warmth of the tavern. [STATE: location=tavern]`,
-        `A trapdoor creaks beneath your boot. You notice the give just in time. [ROLL_REQUEST: ability=dex, dc=14, reason=avoiding a triggered floor trap] [STATE: ]`
+        `A trapdoor creaks beneath your boot. You notice the give just in time. [ROLL_REQUEST: ability=dex, dc=14, reason=avoiding a triggered floor trap] [STATE: ]`,
+        `Niri tells you about her favorite childhood meal as you share rations by the fire. [BOND: niri+=1, reason=personal_moment] [STATE: companion.niri.mood=happy]`,
+        `You take an arrow meant for Niri, shielding her without hesitation. [BOND: niri+=2, reason=defending] [STATE: hp-=4, companion.niri.mood=flustered]`
     ];
     const counter = (this.myInternalState['testCounter'] || 0) % scenarios.length;
     const fakeReply = scenarios[counter];
