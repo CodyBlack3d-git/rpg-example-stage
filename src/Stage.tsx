@@ -212,13 +212,44 @@ const defaultPlayer: PlayerStats = {
 // Niri starts in the party. To start with an empty party instead, set this to [].
 const defaultActiveCompanions: Companion[] = [companionRoster.niri];
 
+// Defensively merge saved player state with defaults — fills in any fields
+// that didn't exist in older save states (e.g., abilities, when they were added).
+const savedPlayer = messageState?.player;
+const mergedPlayer: PlayerStats = savedPlayer
+    ? {
+        ...defaultPlayer,
+        ...savedPlayer,
+        abilities: {...defaultPlayer.abilities, ...(savedPlayer.abilities ?? {})}
+    }
+    : defaultPlayer;
+
+// Same for companions — backfill abilities for any roster companions missing them.
+const savedCompanions = messageState?.activeCompanions;
+const mergedCompanions: Companion[] = savedCompanions
+    ? savedCompanions.map(c => {
+        if (!c.isRoster) return c;
+        const fromRoster = companionRoster[c.id];
+        if (!fromRoster) return c;
+        return {
+            ...fromRoster,
+            ...c,
+            abilities: c.abilities ?? fromRoster.abilities,
+            moodImages: c.moodImages && Object.keys(c.moodImages).length > 0
+                ? c.moodImages
+                : fromRoster.moodImages
+        };
+    })
+    : defaultActiveCompanions;
+
 this.myInternalState = {
-    player: messageState?.player ?? defaultPlayer,
-    activeCompanions: messageState?.activeCompanions ?? defaultActiveCompanions,
+    player: mergedPlayer,
+    activeCompanions: mergedCompanions,
     companionRoster: companionRoster,
     currentLocation: messageState?.currentLocation ?? knownLocations.tavern,
     knownLocations: knownLocations,
-    rollState: messageState?.rollState ?? {kind: 'idle'},
+    rollState: (messageState?.rollState && typeof messageState.rollState === 'object' && 'kind' in messageState.rollState)
+        ? messageState.rollState
+        : {kind: 'idle'},
     numUsers: Object.keys(users).length,
     numChars: Object.keys(characters).length
 };
