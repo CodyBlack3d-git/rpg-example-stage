@@ -736,10 +736,18 @@ applyLocationChange(nameOrId: string): void {
              @description Whether this is itself from another bot, ex. in a group chat. ***/
 } = userMessage;
 
-        // Once the player sends a message after a resolved roll, clear it so it doesn't linger.
+        // Clear resolved rolls only after the AI has had a chance to see them.
+        // We use a "seen" flag stored alongside rollState to track this.
         const rs: RollState = this.myInternalState['rollState'];
         if (rs.kind === 'resolved') {
-            this.myInternalState['rollState'] = {kind: 'idle'};
+            if (this.myInternalState['rollSeen']) {
+                this.myInternalState['rollState'] = {kind: 'idle'};
+                this.myInternalState['rollSeen'] = false;
+            } else {
+                this.myInternalState['rollSeen'] = true;
+            }
+        } else {
+            this.myInternalState['rollSeen'] = false;
         }
 
         return {
@@ -900,8 +908,12 @@ render(): ReactElement {
             const showFreeRoll: boolean = this.myInternalState['showFreeRoll'] ?? false;
 
             const refresh = () => {
+                // Force a state update. In test runner, this is detected via a reload (DEV_MODE only).
+                // In production, the next user message will trigger a natural re-render.
                 this.myInternalState = {...this.myInternalState};
-                window.location.reload();
+                if (DEV_MODE) {
+                    window.location.reload();
+                }
             };
 
             const baseBtn = {
