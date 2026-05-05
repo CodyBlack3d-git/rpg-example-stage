@@ -63,6 +63,16 @@ type SocialUnlock = {
     description: string;   // narrative hint shown to the AI when bond is >= this level
 };
 
+type TimePeriod = 'morning' | 'midday' | 'afternoon' | 'evening' | 'night' | 'late_night';
+
+type TimeState = {
+    day: number;           // 0+, increments when crossing late_night → morning
+    period: TimePeriod;
+};
+
+// Periods in cycle order. Used to advance time and handle wrap-around.
+const TIME_PERIODS: TimePeriod[] = ['morning', 'midday', 'afternoon', 'evening', 'night', 'late_night'];
+
 type Spell = {
     id: string;              // globally unique, e.g. 'niri_healing_light'
     name: string;            // display name, e.g. 'Healing Light'
@@ -124,6 +134,7 @@ type MessageStateType = {
     currentLocation: Location;
     rollState: RollState;
     spellChoice?: SpellChoice | null;
+    timeState?: TimeState;
 };
 
 /***
@@ -345,6 +356,9 @@ this.myInternalState = {
         ? messageState.rollState
         : {kind: 'idle'},
     spellChoice: messageState?.spellChoice ?? null,
+    timeState: (messageState?.timeState && typeof messageState.timeState === 'object' && 'period' in messageState.timeState)
+        ? messageState.timeState
+        : {day: 0, period: 'morning'},
     numUsers: Object.keys(users).length,
     numChars: Object.keys(characters).length
 };
@@ -427,7 +441,10 @@ this.myInternalState = {
             rollState: (state.rollState && typeof state.rollState === 'object' && 'kind' in state.rollState)
                 ? state.rollState
                 : this.myInternalState['rollState'],
-            spellChoice: state.spellChoice ?? null
+            spellChoice: state.spellChoice ?? null,
+            timeState: (state.timeState && typeof state.timeState === 'object' && 'period' in state.timeState)
+                ? state.timeState
+                : this.myInternalState['timeState'] ?? {day: 0, period: 'morning'}
         };
 
         this.bumpVersion();
@@ -650,6 +667,10 @@ ${companionSpellLines || '(none yet)'}
 ${location.name} (id: ${location.id})
 [/CURRENT LOCATION]
 
+[CURRENT TIME]
+Day ${(this.myInternalState['timeState'] as TimeState).day}, ${(this.myInternalState['timeState'] as TimeState).period.replace('_', ' ')}
+[/CURRENT TIME]
+
 [KNOWN LOCATIONS]
 ${knownLocationLines}
 [/KNOWN LOCATIONS]
@@ -718,6 +739,20 @@ Long rest rules:
 - Don't spam long rests. They're a meaningful pause, not a casual recovery. If the player asks to rest somewhere unsafe or hostile, you may decline narratively.
 - The player can also trigger a long rest via the UI; you'll see seeds/HP/MP refilled when that happens.
 
+Time rules:
+- Time tracks day number (starting day 0) and period: morning, midday, afternoon, evening, night, late_night.
+- Use the time naturally to color narration. "Sunlight slants across the floor" at midday, "the tavern's lanterns are lit" at evening, "the road is empty under starlight" at late night.
+- Advance time on its own line via tags:
+  * [TIME: advance=N] — move forward N period steps (1-3 typical). 
+  * [TIME: set=<period>] — jump directly to a named period (wraps to next day if backward).
+- Pacing guidelines (use as needed, not strict math):
+  * Short scene, one conversation, one quick action: usually no advance.
+  * Travel between nearby locations or a longer scene: advance=1.
+  * Travel across distance, extended exploration, eventful chapter: advance=2 or more.
+  * Reaching a destination "by evening" or similar: use [TIME: set=evening].
+- Long rest (handled by [LONG_REST]) automatically advances to next morning. Don't combine [LONG_REST] with [TIME: ...] tags.
+- Don't advance time on every message. The clock should match what the narration earned.
+
 Location rules:
 - To change location, use location=<id or display name>. If it matches a known location id or name, full details are used. Otherwise it's treated as a new unknown place.
 - Only emit location= when the party actually moves to a new place. Don't emit it for stays.
@@ -761,6 +796,38 @@ General rules:
         this.longRest();
         workingText = workingText.replace(restRegex, '').trim();
         appliedRest = true;
+    }
+
+    // Strip and apply any time tags. Formats:
+    //   [TIME: advance=N]   — advance N period steps
+    //   [TIME: set=evening] — jump to that period (advances day if backward)
+    const timeRegex = /\[TIME:([^\]]*)\]/gi;
+    let timeMatch: RegExpExecArray | null;
+    let appliedTime = false;
+    const timeMatches: string[] = [];
+    while ((timeMatch = timeRegex.exec(workingText)) !== null) {
+        timeMatches.push(timeMatch[0]);
+        const content = timeMatch[1].trim();
+        const advanceMatch = content.match(/^advance\s*=\s*(\d+)$/i);
+        if (advanceMatch) {
+            const steps = parseInt(advanceMatch[1], 10);
+            if (!isNaN(steps) && steps > 0) {
+                this.advanceTimeBySteps(steps);
+                appliedTime = true;
+            }
+            continue;
+        }
+        const setMatch = content.match(/^set\s*=\s*(\w+)$/i);
+        if (setMatch) {
+            const target = setMatch[1].toLowerCase() as TimePeriod;
+            this.setTimePeriod(target);
+            appliedTime = true;
+            continue;
+        }
+        console.warn('Stage: malformed TIME tag:', content);
+    }
+    for (const tag of timeMatches) {
+        workingText = workingText.replace(tag, '').trim();
     }
 
     // Strip and apply any bond tags. Format: [BOND: niri+=1, reason=quest_assist]
@@ -811,7 +878,7 @@ General rules:
     const match = workingText.match(stateRegex);
 
     if (!match) {
-        return {cleanedText: workingText, applied: appliedRoll || appliedBond || appliedRest};
+        return {cleanedText: workingText, applied: appliedRoll || appliedBond || appliedRest || appliedTime};
     }
 
     const stateContent = match[1].trim();
@@ -1093,7 +1160,10 @@ longRest(): void {
     player.hp = player.maxHp;
     player.mp = player.maxMp;
     this.myInternalState['player'] = player;
-    console.log(`Stage: long rest. Seeds ${beforeSeeds}→${player.seeds}, HP ${beforeHp}→${player.hp}, MP ${beforeMp}→${player.mp}.`);
+    // Long rest advances to morning of the next day.
+    const ts: TimeState = this.myInternalState['timeState'];
+    this.myInternalState['timeState'] = {day: ts.day + 1, period: 'morning'};
+    console.log(`Stage: long rest. Seeds ${beforeSeeds}→${player.seeds}, HP ${beforeHp}→${player.hp}, MP ${beforeMp}→${player.mp}. Time → Day ${ts.day + 1}, morning.`);
 }
 applyLocationChange(nameOrId: string): void {
     const known: {[id: string]: Location} = this.myInternalState['knownLocations'];
@@ -1118,6 +1188,47 @@ applyLocationChange(nameOrId: string): void {
         image: this.locationPlaceholder(nameOrId, '#555', '#222'),
         isKnown: false
     };
+}
+
+// Advance time by N period steps. Handles wrap-around to next day.
+advanceTimeBySteps(steps: number): void {
+    const ts: TimeState = this.myInternalState['timeState'];
+    let dayDelta = 0;
+    let idx = TIME_PERIODS.indexOf(ts.period);
+    if (idx < 0) idx = 0;
+    idx += steps;
+    while (idx >= TIME_PERIODS.length) {
+        idx -= TIME_PERIODS.length;
+        dayDelta++;
+    }
+    while (idx < 0) {
+        // We don't expect negative steps, but guard anyway.
+        idx += TIME_PERIODS.length;
+        dayDelta--;
+    }
+    const newPeriod = TIME_PERIODS[idx];
+    const newDay = Math.max(0, ts.day + dayDelta);
+    this.myInternalState['timeState'] = {day: newDay, period: newPeriod};
+    console.log(`Stage: time advanced ${steps} step(s) → Day ${newDay}, ${newPeriod}.`);
+}
+
+// Set time to a specific period. If the target period is earlier than current
+// (wraps backward), advance to the next day.
+setTimePeriod(targetPeriod: TimePeriod): void {
+    const ts: TimeState = this.myInternalState['timeState'];
+    const currentIdx = TIME_PERIODS.indexOf(ts.period);
+    const targetIdx = TIME_PERIODS.indexOf(targetPeriod);
+    if (targetIdx < 0) {
+        console.warn(`Stage: unknown time period "${targetPeriod}"`);
+        return;
+    }
+    let newDay = ts.day;
+    if (targetIdx < currentIdx) {
+        // Wrap to next day.
+        newDay++;
+    }
+    this.myInternalState['timeState'] = {day: newDay, period: targetPeriod};
+    console.log(`Stage: time set → Day ${newDay}, ${targetPeriod}.`);
 }
     async beforePrompt(userMessage: Message): Promise<Partial<StageResponse<ChatStateType, MessageStateType>>> {
         /***
@@ -1279,6 +1390,14 @@ renderInner(): ReactElement {
                 {loc.name}
                 {!loc.isKnown && <span style={{fontSize: '10px', marginLeft: '6px', color: '#888'}}>(uncharted)</span>}
             </div>
+            {(() => {
+                const ts: TimeState = this.myInternalState['timeState'];
+                return (
+                    <div style={{fontSize: '11px', color: '#999', marginTop: '2px'}}>
+                        Day {ts.day} · {ts.period.replace('_', ' ')}
+                    </div>
+                );
+            })()}
         </div>
     );
 })()}
@@ -1658,7 +1777,10 @@ renderInner(): ReactElement {
         `You take an arrow meant for Niri, shielding her without hesitation. [BOND: niri+=2, reason=defending] [STATE: hp-=4, companion.niri.mood=flustered]`,
         `Niri reaches into her satchel for a sigil-seed and channels healing light into your wound. [STATE: hp+=5, seeds-=1]`,
         `You set up camp in a hidden glade. The watchfires burn low; sleep finds you all. [LONG_REST]`,
-        `An afternoon of shared stories deepens what's between you and Niri. (test: 5x bond) [BOND: niri+=5, reason=personal_moment]`
+        `An afternoon of shared stories deepens what's between you and Niri. (test: 5x bond) [BOND: niri+=5, reason=personal_moment]`,
+        `Hours pass as you cross the windswept plains. [TIME: advance=2]`,
+        `By the time you arrive, the lanterns are lit and the streets are emptying. [TIME: set=evening]`,
+        `The tavern stays lively into the small hours. [TIME: set=late_night]`
     ];
     const counter = (this.myInternalState['testCounter'] || 0) % scenarios.length;
     const fakeReply = scenarios[counter];
