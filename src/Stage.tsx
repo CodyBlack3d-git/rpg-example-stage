@@ -376,9 +376,61 @@ this.myInternalState = {
          or a swipe. Note how neither InitState nor ChatState are given here. They are not for
          state that is affected by swiping.
          ***/
-        if (state != null) {
-            this.myInternalState = {...this.myInternalState, ...state};
-        }
+        if (state == null) return;
+
+        // Defensive merge: incoming state may be from an older save without
+        // newer fields (abilities, seeds, tome, bond, etc). Backfill anything missing
+        // so render code doesn't crash on undefined.
+        const currentPlayer: PlayerStats = this.myInternalState['player'];
+        const incomingPlayer = state.player;
+        const mergedPlayer: PlayerStats = incomingPlayer
+            ? {
+                ...currentPlayer,
+                ...incomingPlayer,
+                abilities: {
+                    ...(currentPlayer.abilities),
+                    ...(incomingPlayer.abilities ?? {})
+                },
+                seeds: incomingPlayer.seeds ?? currentPlayer.seeds,
+                maxSeeds: incomingPlayer.maxSeeds ?? currentPlayer.maxSeeds,
+                tome: incomingPlayer.tome ?? currentPlayer.tome ?? []
+            }
+            : currentPlayer;
+
+        const roster: {[id: string]: Companion} = this.myInternalState['companionRoster'];
+        const incomingCompanions = state.activeCompanions;
+        const mergedCompanions: Companion[] = incomingCompanions
+            ? incomingCompanions.map(c => {
+                if (!c.isRoster) return c;
+                const fromRoster = roster[c.id];
+                if (!fromRoster) return c;
+                return {
+                    ...fromRoster,
+                    ...c,
+                    abilities: c.abilities ?? fromRoster.abilities,
+                    moodImages: c.moodImages && Object.keys(c.moodImages).length > 0
+                        ? c.moodImages
+                        : fromRoster.moodImages,
+                    bondLevel: c.bondLevel ?? 0,
+                    bondProgress: c.bondProgress ?? 0,
+                    socialUnlocks: c.socialUnlocks ?? fromRoster.socialUnlocks ?? [],
+                    spellList: fromRoster.spellList ?? []
+                };
+            })
+            : (this.myInternalState['activeCompanions'] as Companion[]);
+
+        this.myInternalState = {
+            ...this.myInternalState,
+            player: mergedPlayer,
+            activeCompanions: mergedCompanions,
+            currentLocation: state.currentLocation ?? this.myInternalState['currentLocation'],
+            rollState: (state.rollState && typeof state.rollState === 'object' && 'kind' in state.rollState)
+                ? state.rollState
+                : this.myInternalState['rollState'],
+            spellChoice: state.spellChoice ?? null
+        };
+
+        this.bumpVersion();
     }
     placeholderImage(name: string, mood: string, color: string): string {
     // Generates a colored SVG with the name and mood drawn on it,
