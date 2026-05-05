@@ -22,6 +22,7 @@ type PlayerStats = {
     abilities: AbilityScores;
     seeds: number;
     maxSeeds: number;
+    tome: string[];  // spell IDs the player has learned
 };
 
 type AbilityScores = {
@@ -62,6 +63,23 @@ type SocialUnlock = {
     description: string;   // narrative hint shown to the AI when bond is >= this level
 };
 
+type Spell = {
+    id: string;              // globally unique, e.g. 'niri_healing_light'
+    name: string;            // display name, e.g. 'Healing Light'
+    description: string;     // what the spell does, narratively
+    seedCost: number;        // seeds consumed per cast
+    bondRequirement: number; // minimum companion bond level for this spell to unlock
+    effectTags?: string[];   // optional tags like ['heal', 'utility'] — for AI matching
+};
+
+// State for an active spell-choice picker. Triggered when bond rises to a level
+// at which one or more new spells become available for the player to learn.
+type SpellChoice = {
+    companionId: string;        // which companion is teaching
+    bondLevel: number;          // bond level reached that triggered this
+    candidates: Spell[];        // 3 random spells offered (or fewer if pool too small)
+};
+
 type Companion = {
     id: string;
     name: string;
@@ -73,11 +91,15 @@ type Companion = {
     bondLevel?: number;         // 0-10; defaults to 0
     bondProgress?: number;      // points accumulated toward next level
     socialUnlocks?: SocialUnlock[];  // narrative beats keyed to bond level
+    spellList?: Spell[];        // spells this companion knows; used for bond-up picker
 };
 
 // Cumulative cost to reach each bond level. Index 0 = cost to reach level 1.
 // Total to max bond (10): 144 points.
 const BOND_LEVEL_COSTS: number[] = [5, 6, 8, 9, 11, 14, 17, 20, 24, 30];
+
+// Helper: compute max seeds for a given player level. Base 5 + 1 per level.
+const computeMaxSeeds = (level: number): number => 5 + Math.max(1, level);
 
 // Bond event types and the points they award. The AI selects from this list
 // when emitting [BOND: ...] tags. Progress-only — no events reduce bond.
@@ -101,6 +123,7 @@ type MessageStateType = {
     activeCompanions: Companion[];
     currentLocation: Location;
     rollState: RollState;
+    spellChoice?: SpellChoice | null;
 };
 
 /***
@@ -204,6 +227,25 @@ const companionRoster: {[id: string]: Companion} = {
             // Fill these in later. Example shape:
             // { bondLevel: 2, description: "Niri shares the name of her home village." },
             // { bondLevel: 4, description: "Niri starts using a private nickname for the player." }
+        ],
+        spellList: [
+            // Fill these in later. Example shape:
+            // {
+            //     id: 'niri_healing_light',
+            //     name: 'Healing Light',
+            //     description: 'A pulse of pale-blue motes that mends minor wounds.',
+            //     seedCost: 1,
+            //     bondRequirement: 0,
+            //     effectTags: ['heal']
+            // },
+            // {
+            //     id: 'niri_warding_breath',
+            //     name: 'Warding Breath',
+            //     description: 'A whispered prayer that briefly steadies an ally against fear.',
+            //     seedCost: 1,
+            //     bondRequirement: 2,
+            //     effectTags: ['utility', 'social']
+            // }
         ]
     }
 };
@@ -247,11 +289,9 @@ const defaultPlayer: PlayerStats = {
         cha: 11
     },
     seeds: 6,    // base 5 + level 1
-    maxSeeds: 6
+    maxSeeds: 6,
+    tome: []     // empty grimoire to start
 };
-
-// Helper: compute max seeds for a given player level. Base 5 + 1 per level.
-const computeMaxSeeds = (level: number): number => 5 + Math.max(1, level);  
 
 // Niri starts in the party. To start with an empty party instead, set this to [].
 const defaultActiveCompanions: Companion[] = [companionRoster.niri];
@@ -266,7 +306,8 @@ const mergedPlayer: PlayerStats = savedPlayer
         abilities: {...defaultPlayer.abilities, ...(savedPlayer.abilities ?? {})},
         // Backfill seed fields. If they're missing, scale to current level.
         maxSeeds: savedPlayer.maxSeeds ?? computeMaxSeeds(savedPlayer.level ?? 1),
-        seeds: savedPlayer.seeds ?? computeMaxSeeds(savedPlayer.level ?? 1)
+        seeds: savedPlayer.seeds ?? computeMaxSeeds(savedPlayer.level ?? 1),
+        tome: savedPlayer.tome ?? []
     }
     : defaultPlayer;
 
@@ -286,7 +327,10 @@ const mergedCompanions: Companion[] = savedCompanions
                 : fromRoster.moodImages,
             bondLevel: c.bondLevel ?? 0,
             bondProgress: c.bondProgress ?? 0,
-            socialUnlocks: c.socialUnlocks ?? fromRoster.socialUnlocks ?? []
+            socialUnlocks: c.socialUnlocks ?? fromRoster.socialUnlocks ?? [],
+            // Always pull spellList from the current roster definition. Spells are
+            // designer data, not save data — we want the live definition.
+            spellList: fromRoster.spellList ?? []
         };
     })
     : defaultActiveCompanions;
@@ -300,6 +344,7 @@ this.myInternalState = {
     rollState: (messageState?.rollState && typeof messageState.rollState === 'object' && 'kind' in messageState.rollState)
         ? messageState.rollState
         : {kind: 'idle'},
+    spellChoice: messageState?.spellChoice ?? null,
     numUsers: Object.keys(users).length,
     numChars: Object.keys(characters).length
 };
@@ -476,6 +521,36 @@ formatStatsForPrompt(): string {
     const knownLocations: {[id: string]: Location} = this.myInternalState['knownLocations'];
     const inv = player.inventory.length === 0 ? 'empty' : player.inventory.join(', ');
 
+    // Build a lookup of all spells available across active companions, for tome display.
+    const allSpells: {[id: string]: {spell: Spell; teacherName: string}} = {};
+    for (const c of companions) {
+        if (!c.spellList) continue;
+        for (const s of c.spellList) {
+            allSpells[s.id] = {spell: s, teacherName: c.name};
+        }
+    }
+    // The tome: spells the player has learned. Look up by id.
+    const tomeIds = player.tome ?? [];
+    const tomeLines = tomeIds.length === 0
+        ? '(empty — no spells learned yet)'
+        : tomeIds.map(id => {
+            const entry = allSpells[id];
+            if (!entry) return `- ${id} (unknown — teacher not in party?)`;
+            const s = entry.spell;
+            return `- ${s.name} (id: ${s.id}, cost: ${s.seedCost}, taught by ${entry.teacherName}): ${s.description}`;
+        }).join('\n');
+
+    // For each companion, list which of their spells are available to *them* given current bond.
+    // (Important: companions cast from their own list, regardless of player tome.)
+    const companionSpellLines = companions
+        .filter(c => c.isRoster && c.spellList && c.spellList.length > 0)
+        .map(c => {
+            const available = (c.spellList ?? []).filter(s => s.bondRequirement <= (c.bondLevel ?? 0));
+            if (available.length === 0) return `- ${c.name}: (none yet)`;
+            const list = available.map(s => `${s.name} (cost: ${s.seedCost})`).join(', ');
+            return `- ${c.name}: ${list}`;
+        }).join('\n');
+
     const companionLines = companions.length === 0
         ? 'No active companions.'
         : companions.map(c => {
@@ -510,6 +585,14 @@ Abilities: STR ${player.abilities.str} (${this.formatModifier(player.abilities.s
 [ACTIVE COMPANIONS]
 ${companionLines}
 [/ACTIVE COMPANIONS]
+
+[TOME — spells the player has learned, available for their companions to cast]
+${tomeLines}
+[/TOME]
+
+[COMPANION SPELL ACCESS — spells each companion has unlocked at their current bond]
+${companionSpellLines || '(none yet)'}
+[/COMPANION SPELL ACCESS]
 
 [CURRENT LOCATION]
 ${location.name} (id: ${location.id})
@@ -566,6 +649,15 @@ Seed rules:
 - When a companion casts a spell, deduct the cost via [STATE: seeds-=N] in your response.
 - Seeds replenish only on long rest. Don't restore them through other means (potions, items, etc.) unless explicitly part of player inventory or scene logic.
 - Companions cannot share or transfer seeds between each other. Once consumed, the seed is gone until rest.
+
+Spell casting rules:
+- Companions cast their own spells; the player does not cast directly.
+- A companion can ONLY cast a spell that appears in their COMPANION SPELL ACCESS list above. Do not invent spells, repurpose other companions' spells, or cast a spell the companion hasn't unlocked through bond.
+- The TOME shows which spells the player has learned through bond growth. The tome is descriptive: it tracks the player's relationship-built knowledge. A companion can still cast their own unlocked spells regardless of tome, but the tome reflects the magical bond between player and companion.
+- When a companion casts: narrate the moment in-character (the gesture, the visual, the cost), then deduct seeds via [STATE: seeds-=N] where N matches the spell's seed cost.
+- If the player asks a companion to cast something not in COMPANION SPELL ACCESS, narrate the companion struggling, declining, or admitting they don't know it. Don't pretend they can.
+- If the player asks for a spell when seeds=0, the companion cannot comply. Narrate the strain, the empty satchel, the moment of helplessness — turn it into character.
+- Don't have companions cast unprompted in trivial moments. Save magic for stakes.
 
 Long rest rules:
 - A long rest occurs when the party rests in a safe location — an inn, a defensible camp, sanctuary. It's a full night's recovery.
@@ -874,10 +966,70 @@ applyBondProgress(id: string, amount: number, reason: string): void {
         level++;
     }
 
+    const leveledUp = level > currentLevel;
     target.bondLevel = level;
     target.bondProgress = progress;
     console.log(`Stage: ${target.name} +${amount} bond (${reason}). Now level ${level}, ${progress}/${BOND_LEVEL_COSTS[level] ?? '—'} to next.`);
     this.myInternalState['activeCompanions'] = [...companions];
+
+    // On level-up, offer the player a spell choice if any are available at the new level.
+    if (leveledUp) {
+        this.offerSpellChoice(target);
+    }
+}
+
+// Build a SpellChoice for this companion if there are any unlearned spells
+// at or below their new bond level. Up to 3 are presented at random.
+offerSpellChoice(companion: Companion): void {
+    if (!companion.spellList || companion.spellList.length === 0) return;
+    const player: PlayerStats = this.myInternalState['player'];
+    const learned = new Set(player.tome ?? []);
+
+    const eligible = companion.spellList.filter(
+        s => s.bondRequirement <= (companion.bondLevel ?? 0) && !learned.has(s.id)
+    );
+    if (eligible.length === 0) {
+        console.log(`Stage: ${companion.name} bond up, but no new spells available.`);
+        return;
+    }
+
+    // Shuffle (Fisher-Yates) and take up to 3.
+    const shuffled = [...eligible];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    const candidates = shuffled.slice(0, 3);
+
+    this.myInternalState['spellChoice'] = {
+        companionId: companion.id,
+        bondLevel: companion.bondLevel ?? 0,
+        candidates
+    };
+    console.log(`Stage: spell choice from ${companion.name} (${candidates.length} candidate${candidates.length === 1 ? '' : 's'}).`);
+}
+
+// Player picks one of the offered spells. Adds to tome, clears the choice.
+chooseSpell(spellId: string): void {
+    const choice: SpellChoice | null = this.myInternalState['spellChoice'];
+    if (!choice) return;
+    const spell = choice.candidates.find(s => s.id === spellId);
+    if (!spell) {
+        console.warn(`Stage: chose spell "${spellId}" not in current candidates`);
+        return;
+    }
+    const player: PlayerStats = {...this.myInternalState['player']};
+    player.tome = [...(player.tome ?? []), spell.id];
+    this.myInternalState['player'] = player;
+    this.myInternalState['spellChoice'] = null;
+    console.log(`Stage: learned spell "${spell.name}" (${spell.id}).`);
+}
+
+// Player declines all candidates — choice cleared without learning anything.
+// Spells may reappear next level-up if still eligible.
+dismissSpellChoice(): void {
+    this.myInternalState['spellChoice'] = null;
+    console.log('Stage: spell choice dismissed.');
 }
 
 longRest(): void {
@@ -957,7 +1109,8 @@ applyLocationChange(nameOrId: string): void {
                 player: this.myInternalState['player'],
                 activeCompanions: this.myInternalState['activeCompanions'],
                 currentLocation: this.myInternalState['currentLocation'],
-                rollState: this.myInternalState['rollState']
+                rollState: this.myInternalState['rollState'],
+                spellChoice: this.myInternalState['spellChoice']
             },
             /*** @type null | string @description If not null, the user's message itself is replaced
              with this value, both in what's sent to the LLM and in the database. ***/
@@ -1004,7 +1157,8 @@ applyLocationChange(nameOrId: string): void {
                 player: this.myInternalState['player'],
                 activeCompanions: this.myInternalState['activeCompanions'],
                 currentLocation: this.myInternalState['currentLocation'],
-                rollState: this.myInternalState['rollState']
+                rollState: this.myInternalState['rollState'],
+                spellChoice: this.myInternalState['spellChoice']
             },
             /*** @type null | string @description If not null, the bot's response itself is replaced
              with this value, both in what's sent to the LLM subsequently and in the database. ***/
@@ -1139,6 +1293,107 @@ renderInner(): ReactElement {
                     {player.inventory.map((item, i) => <li key={i}>{item}</li>)}
                 </ul>}
         </div>
+
+        {(() => {
+            // Tome panel — shows learned spells with details.
+            const tome = player.tome ?? [];
+            const companions = this.myInternalState['activeCompanions'] as Companion[];
+            const lookup: {[id: string]: {spell: Spell; teacherName: string}} = {};
+            for (const c of companions) {
+                if (!c.spellList) continue;
+                for (const s of c.spellList) {
+                    lookup[s.id] = {spell: s, teacherName: c.name};
+                }
+            }
+            return (
+                <div style={{marginTop: '12px'}}>
+                    <div style={{fontSize: '12px', color: '#aaa', marginBottom: '4px'}}>Tome</div>
+                    {tome.length === 0
+                        ? <div style={{fontStyle: 'italic', color: '#777'}}>(empty)</div>
+                        : <ul style={{margin: 0, paddingLeft: '20px', fontSize: '12px'}}>
+                            {tome.map(id => {
+                                const entry = lookup[id];
+                                if (!entry) return <li key={id} style={{color: '#666'}}>{id} (unknown)</li>;
+                                return (
+                                    <li key={id} title={entry.spell.description}>
+                                        <strong>{entry.spell.name}</strong>{' '}
+                                        <span style={{fontSize: '10px', color: '#888'}}>
+                                            ({entry.spell.seedCost} seed{entry.spell.seedCost === 1 ? '' : 's'}, {entry.teacherName})
+                                        </span>
+                                    </li>
+                                );
+                            })}
+                        </ul>}
+                </div>
+            );
+        })()}
+
+        {(() => {
+            // Spell choice picker — shown only when a bond level-up just offered new spells.
+            const choice: SpellChoice | null = this.myInternalState['spellChoice'];
+            if (!choice) return null;
+            const teacher = (this.myInternalState['activeCompanions'] as Companion[])
+                .find(c => c.id === choice.companionId);
+            const teacherName = teacher?.name ?? choice.companionId;
+            return (
+                <div style={{
+                    marginTop: '12px',
+                    padding: '8px',
+                    border: '1px solid #7aaeff',
+                    borderRadius: '6px',
+                    background: 'rgba(40, 60, 90, 0.4)'
+                }}>
+                    <div style={{fontSize: '13px', fontWeight: 'bold', color: '#ffd56b', marginBottom: '4px'}}>
+                        {teacherName} bond {choice.bondLevel} reached
+                    </div>
+                    <div style={{fontSize: '11px', color: '#bbb', marginBottom: '8px', fontStyle: 'italic'}}>
+                        Choose one spell to add to your tome:
+                    </div>
+                    <div style={{display: 'flex', flexDirection: 'column', gap: '6px'}}>
+                        {choice.candidates.map(spell => (
+                            <button
+                                key={spell.id}
+                                style={{
+                                    textAlign: 'left',
+                                    padding: '6px 8px',
+                                    cursor: 'pointer',
+                                    background: '#2a2a2a',
+                                    color: '#e0e0e0',
+                                    border: '1px solid #555',
+                                    borderRadius: '3px',
+                                    fontSize: '11px'
+                                }}
+                                onClick={() => { this.chooseSpell(spell.id); this.bumpVersion(); }}
+                            >
+                                <div style={{fontWeight: 'bold'}}>
+                                    {spell.name}{' '}
+                                    <span style={{color: '#888', fontWeight: 'normal'}}>
+                                        ({spell.seedCost} seed{spell.seedCost === 1 ? '' : 's'})
+                                    </span>
+                                </div>
+                                <div style={{color: '#aaa', marginTop: '2px'}}>{spell.description}</div>
+                            </button>
+                        ))}
+                        <button
+                            style={{
+                                fontSize: '10px',
+                                padding: '3px 8px',
+                                cursor: 'pointer',
+                                background: 'transparent',
+                                color: '#888',
+                                border: '1px solid #444',
+                                borderRadius: '3px',
+                                marginTop: '4px'
+                            }}
+                            onClick={() => { this.dismissSpellChoice(); this.bumpVersion(); }}
+                        >
+                            Skip for now
+                        </button>
+                    </div>
+                </div>
+            );
+        })()}
+
         {(() => {
             const rs: RollState = this.myInternalState['rollState'];
             const showFreeRoll: boolean = this.myInternalState['showFreeRoll'] ?? false;
@@ -1350,7 +1605,8 @@ renderInner(): ReactElement {
         `Niri tells you about her favorite childhood meal as you share rations by the fire. [BOND: niri+=1, reason=personal_moment] [STATE: companion.niri.mood=happy]`,
         `You take an arrow meant for Niri, shielding her without hesitation. [BOND: niri+=2, reason=defending] [STATE: hp-=4, companion.niri.mood=flustered]`,
         `Niri reaches into her satchel for a sigil-seed and channels healing light into your wound. [STATE: hp+=5, seeds-=1]`,
-        `You set up camp in a hidden glade. The watchfires burn low; sleep finds you all. [LONG_REST]`
+        `You set up camp in a hidden glade. The watchfires burn low; sleep finds you all. [LONG_REST]`,
+        `An afternoon of shared stories deepens what's between you and Niri. (test: 5x bond) [BOND: niri+=5, reason=personal_moment]`
     ];
     const counter = (this.myInternalState['testCounter'] || 0) % scenarios.length;
     const fakeReply = scenarios[counter];
