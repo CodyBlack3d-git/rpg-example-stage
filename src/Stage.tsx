@@ -113,7 +113,7 @@ type ChatStateType = any;
  ***/
 // Set to true while developing in the test runner.
 // MUST be false before deploying to Chub.
-const DEV_MODE = true;
+const DEV_MODE = false;
  export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateType, ConfigType> {
 
     /***
