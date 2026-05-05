@@ -20,6 +20,8 @@ type PlayerStats = {
     xp: number;
     inventory: string[];
     abilities: AbilityScores;
+    seeds: number;
+    maxSeeds: number;
 };
 
 type AbilityScores = {
@@ -134,7 +136,7 @@ type ChatStateType = any;
  ***/
 // Set to true while developing in the test runner.
 // MUST be false before deploying to Chub.
-const DEV_MODE = false;
+const DEV_MODE = true;
  export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateType, ConfigType> {
 
     /***
@@ -243,8 +245,13 @@ const defaultPlayer: PlayerStats = {
         int: 10,
         wis: 13,
         cha: 11
-    }
-};        
+    },
+    seeds: 6,    // base 5 + level 1
+    maxSeeds: 6
+};
+
+// Helper: compute max seeds for a given player level. Base 5 + 1 per level.
+const computeMaxSeeds = (level: number): number => 5 + Math.max(1, level);  
 
 // Niri starts in the party. To start with an empty party instead, set this to [].
 const defaultActiveCompanions: Companion[] = [companionRoster.niri];
@@ -256,7 +263,10 @@ const mergedPlayer: PlayerStats = savedPlayer
     ? {
         ...defaultPlayer,
         ...savedPlayer,
-        abilities: {...defaultPlayer.abilities, ...(savedPlayer.abilities ?? {})}
+        abilities: {...defaultPlayer.abilities, ...(savedPlayer.abilities ?? {})},
+        // Backfill seed fields. If they're missing, scale to current level.
+        maxSeeds: savedPlayer.maxSeeds ?? computeMaxSeeds(savedPlayer.level ?? 1),
+        seeds: savedPlayer.seeds ?? computeMaxSeeds(savedPlayer.level ?? 1)
     }
     : defaultPlayer;
 
@@ -491,6 +501,7 @@ formatStatsForPrompt(): string {
     return `[CURRENT PLAYER STATE]
 HP: ${player.hp}/${player.maxHp}
 MP: ${player.mp}/${player.maxMp}
+Seeds: ${player.seeds}/${player.maxSeeds}
 Level: ${player.level}, XP: ${player.xp}
 Inventory: ${inv}
 Abilities: STR ${player.abilities.str} (${this.formatModifier(player.abilities.str)}), DEX ${player.abilities.dex} (${this.formatModifier(player.abilities.dex)}), CON ${player.abilities.con} (${this.formatModifier(player.abilities.con)}), INT ${player.abilities.int} (${this.formatModifier(player.abilities.int)}), WIS ${player.abilities.wis} (${this.formatModifier(player.abilities.wis)}), CHA ${player.abilities.cha} (${this.formatModifier(player.abilities.cha)})
@@ -549,6 +560,20 @@ Bond rules:
 - Award the lower amount when in doubt; the system rewards consistent care over time.
 - When a companion has unlocked social beats (shown in the ACTIVE COMPANIONS block), naturally weave them into your narration — share the detail, use the nickname, etc. The unlock is permission, not obligation; let it happen organically.
 
+Seed rules:
+- Seeds are a player resource that companions consume to cast their spells. They are shown in the player state.
+- Companions cannot cast spells if the player's seeds are 0. Don't have a companion attempt magic when seeds=0.
+- When a companion casts a spell, deduct the cost via [STATE: seeds-=N] in your response.
+- Seeds replenish only on long rest. Don't restore them through other means (potions, items, etc.) unless explicitly part of player inventory or scene logic.
+- Companions cannot share or transfer seeds between each other. Once consumed, the seed is gone until rest.
+
+Long rest rules:
+- A long rest occurs when the party rests in a safe location — an inn, a defensible camp, sanctuary. It's a full night's recovery.
+- When the narrative reaches a clear long rest moment, declare it on its own line: [LONG_REST]
+- A long rest restores HP, MP, and seeds to maximum. Don't include those individual stat changes in [STATE: ] — the rest tag handles them.
+- Don't spam long rests. They're a meaningful pause, not a casual recovery. If the player asks to rest somewhere unsafe or hostile, you may decline narratively.
+- The player can also trigger a long rest via the UI; you'll see seeds/HP/MP refilled when that happens.
+
 Location rules:
 - To change location, use location=<id or display name>. If it matches a known location id or name, full details are used. Otherwise it's treated as a new unknown place.
 - Only emit location= when the party actually moves to a new place. Don't emit it for stays.
@@ -583,6 +608,15 @@ General rules:
             appliedRoll = true;
         }
         workingText = workingText.replace(rollRegex, '').trim();
+    }
+
+    // Strip and apply any long rest tags. Format: [LONG_REST]
+    const restRegex = /\[LONG_REST\]/gi;
+    let appliedRest = false;
+    if (restRegex.test(workingText)) {
+        this.longRest();
+        workingText = workingText.replace(restRegex, '').trim();
+        appliedRest = true;
     }
 
     // Strip and apply any bond tags. Format: [BOND: niri+=1, reason=quest_assist]
@@ -633,7 +667,7 @@ General rules:
     const match = workingText.match(stateRegex);
 
     if (!match) {
-        return {cleanedText: workingText, applied: appliedRoll || appliedBond};
+        return {cleanedText: workingText, applied: appliedRoll || appliedBond || appliedRest};
     }
 
     const stateContent = match[1].trim();
@@ -694,16 +728,27 @@ General rules:
     console.warn('Stage: could not parse state update:', update);
 }
 
-    // Clamp HP/MP to valid ranges.
+    // Clamp HP/MP/seeds to valid ranges.
     player.hp = Math.max(0, Math.min(player.hp, player.maxHp));
     player.mp = Math.max(0, Math.min(player.mp, player.maxMp));
+    player.seeds = Math.max(0, Math.min(player.seeds, player.maxSeeds));
+
+    // If level changed and the player's maxSeeds wasn't explicitly set this turn, scale it.
+    // We detect this by comparing to what level-based max would be.
+    const expectedMax = computeMaxSeeds(player.level);
+    if (player.maxSeeds < expectedMax) {
+        // Level went up — grant the new max as a small surprise refill.
+        const gain = expectedMax - player.maxSeeds;
+        player.maxSeeds = expectedMax;
+        player.seeds = Math.min(player.maxSeeds, player.seeds + gain);
+    }
 
     this.myInternalState['player'] = player;
     return {cleanedText, applied: true};
 }
 
 applyDelta(player: PlayerStats, field: string, value: string, op: 'set' | 'add' | 'subtract'): void {
-    const numericFields = ['hp', 'maxHp', 'mp', 'maxMp', 'level', 'xp'];
+    const numericFields = ['hp', 'maxHp', 'mp', 'maxMp', 'level', 'xp', 'seeds', 'maxSeeds'];
 
     if (field === 'inventory') {
         const itemName = value.trim();
@@ -833,6 +878,18 @@ applyBondProgress(id: string, amount: number, reason: string): void {
     target.bondProgress = progress;
     console.log(`Stage: ${target.name} +${amount} bond (${reason}). Now level ${level}, ${progress}/${BOND_LEVEL_COSTS[level] ?? '—'} to next.`);
     this.myInternalState['activeCompanions'] = [...companions];
+}
+
+longRest(): void {
+    const player: PlayerStats = {...this.myInternalState['player']};
+    const beforeSeeds = player.seeds;
+    const beforeHp = player.hp;
+    const beforeMp = player.mp;
+    player.seeds = player.maxSeeds;
+    player.hp = player.maxHp;
+    player.mp = player.maxMp;
+    this.myInternalState['player'] = player;
+    console.log(`Stage: long rest. Seeds ${beforeSeeds}→${player.seeds}, HP ${beforeHp}→${player.hp}, MP ${beforeMp}→${player.mp}.`);
 }
 applyLocationChange(nameOrId: string): void {
     const known: {[id: string]: Location} = this.myInternalState['knownLocations'];
@@ -1025,6 +1082,25 @@ renderInner(): ReactElement {
             <div>MP: <span style={{color: '#6bb6ff'}}>{player.mp}/{player.maxMp}</span></div>
             <div>Lvl: <span style={{color: '#ffd56b'}}>{player.level}</span></div>
             <div>XP: {player.xp}</div>
+            <div>Seeds: <span style={{color: '#aac46b'}}>{player.seeds}/{player.maxSeeds}</span></div>
+        </div>
+
+        <div style={{marginBottom: '8px'}}>
+            <button
+                style={{
+                    fontSize: '11px',
+                    padding: '4px 10px',
+                    cursor: 'pointer',
+                    background: '#2a3a2a',
+                    color: '#e0e0e0',
+                    border: '1px solid #4a5a4a',
+                    borderRadius: '3px'
+                }}
+                onClick={() => { this.longRest(); this.bumpVersion(); }}
+                title="Restore HP, MP, and seeds to maximum."
+            >
+                Long rest
+            </button>
         </div>
 
         <div style={{
@@ -1272,7 +1348,9 @@ renderInner(): ReactElement {
         `You return to the warmth of the tavern. [STATE: location=tavern]`,
         `A trapdoor creaks beneath your boot. You notice the give just in time. [ROLL_REQUEST: ability=dex, dc=14, reason=avoiding a triggered floor trap] [STATE: ]`,
         `Niri tells you about her favorite childhood meal as you share rations by the fire. [BOND: niri+=1, reason=personal_moment] [STATE: companion.niri.mood=happy]`,
-        `You take an arrow meant for Niri, shielding her without hesitation. [BOND: niri+=2, reason=defending] [STATE: hp-=4, companion.niri.mood=flustered]`
+        `You take an arrow meant for Niri, shielding her without hesitation. [BOND: niri+=2, reason=defending] [STATE: hp-=4, companion.niri.mood=flustered]`,
+        `Niri reaches into her satchel for a sigil-seed and channels healing light into your wound. [STATE: hp+=5, seeds-=1]`,
+        `You set up camp in a hidden glade. The watchfires burn low; sleep finds you all. [LONG_REST]`
     ];
     const counter = (this.myInternalState['testCounter'] || 0) % scenarios.length;
     const fakeReply = scenarios[counter];
