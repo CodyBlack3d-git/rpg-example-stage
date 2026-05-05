@@ -1,4 +1,4 @@
-import {ReactElement} from "react";
+import React, {ReactElement, useState, useEffect} from "react";
 import {StageBase, StageResponse, InitialData, Message} from "@chub-ai/stages-ts";
 import {LoadResponse} from "@chub-ai/stages-ts/dist/types/load";
 
@@ -122,6 +122,15 @@ const DEV_MODE = false;
      but exists as long as the instance does, i.e., the chat page is open.
      ***/
     myInternalState: {[key: string]: any};
+    // A simple counter that increments on every change. The wrapper
+    // component watches this to know when to re-render.
+    private renderVersion: number = 0;
+    private renderListeners: Set<() => void> = new Set();
+
+    private bumpVersion(): void {
+        this.renderVersion++;
+        this.renderListeners.forEach(fn => fn());
+    }
 
     constructor(data: InitialData<InitStateType, ChatStateType, MessageStateType, ConfigType>) {
         /***
@@ -750,6 +759,9 @@ applyLocationChange(nameOrId: string): void {
             this.myInternalState['rollSeen'] = false;
         }
 
+        // Notify any subscribed views to re-render with the new state.
+        this.bumpVersion();
+
         return {
             /*** @type null | string @description A string to add to the
              end of the final prompt sent to the LLM,
@@ -795,6 +807,9 @@ applyLocationChange(nameOrId: string): void {
 
         const {cleanedText, applied} = this.parseStateUpdate(content);
 
+        // Notify any subscribed views to re-render with the new state.
+        this.bumpVersion();
+
         return {
             /*** @type null | string @description A string to add to the
              end of the final prompt sent to the LLM,
@@ -819,6 +834,24 @@ applyLocationChange(nameOrId: string): void {
     }
 
 render(): ReactElement {
+    // The class itself returns this small wrapper. The wrapper subscribes
+    // to renderVersion bumps from the class so React properly re-renders
+    // when buttons are clicked. All the actual rendering logic happens
+    // inside StageView.
+    const stage = this;
+    const StageView = (): ReactElement => {
+        const [, setVersion] = useState(stage.renderVersion);
+        useEffect(() => {
+            const listener = () => setVersion(stage.renderVersion);
+            stage.renderListeners.add(listener);
+            return () => { stage.renderListeners.delete(listener); };
+        }, []);
+        return stage.renderInner();
+    };
+    return <StageView />;
+}
+
+renderInner(): ReactElement {
     const player: PlayerStats = this.myInternalState['player'];
 
       return <div style={{
@@ -908,12 +941,7 @@ render(): ReactElement {
             const showFreeRoll: boolean = this.myInternalState['showFreeRoll'] ?? false;
 
             const refresh = () => {
-                // Force a state update. In test runner, this is detected via a reload (DEV_MODE only).
-                // In production, the next user message will trigger a natural re-render.
-                this.myInternalState = {...this.myInternalState};
-                if (DEV_MODE) {
-                    window.location.reload();
-                }
+                this.bumpVersion();
             };
 
             const baseBtn = {
@@ -1099,8 +1127,7 @@ render(): ReactElement {
     console.log('Cleaned text:', result.cleanedText);
     console.log('New state:', this.myInternalState);
 
-    // Reload the page to pick up state changes in dev.
-    window.location.reload();
+    this.bumpVersion();
 }}
 >
         Simulate combat
