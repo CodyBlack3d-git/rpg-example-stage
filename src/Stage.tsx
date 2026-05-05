@@ -18,17 +18,51 @@ type PlayerStats = {
     maxMp: number;
     level: number;
     xp: number;
-    gold: number;
     inventory: string[];
+    abilities: AbilityScores;
 };
 
+type AbilityScores = {
+    str: number;
+    dex: number;
+    con: number;
+    int: number;
+    wis: number;
+    cha: number;
+};
+
+type RollRequest = {
+    ability: string;
+    dc?: number;
+    reason: string;
+    forCompanion?: string;
+};
+
+type RollResult = {
+    ability: string;
+    dc?: number;
+    reason: string;
+    forCompanion?: string;
+    raw: number;
+    modifier: number;
+    total: number;
+    advantage: 'normal' | 'advantage' | 'disadvantage';
+    success?: boolean;
+};
+
+type RollState =
+    | {kind: 'idle'}
+    | {kind: 'pending'; request: RollRequest}
+    | {kind: 'resolved'; result: RollResult};
+
 type Companion = {
-    id: string;           // lowercase, no spaces — used in state tags (e.g. "niri")
-    name: string;         // display name
-    mood: string;         // current mood, must be a key in moodImages
-    moodImages: {[mood: string]: string};  // maps mood name → image URL
-    description?: string; // optional — shown on hover or in expanded view
-    isRoster: boolean;    // true if predefined; false if AI-introduced text-only
+    id: string;
+    name: string;
+    mood: string;
+    moodImages: {[mood: string]: string};
+    description?: string;
+    isRoster: boolean;
+    abilities?: AbilityScores;  // optional — text-only newcomers don't need them
 };
 
 type Location = {
@@ -43,6 +77,7 @@ type MessageStateType = {
     player: PlayerStats;
     activeCompanions: Companion[];
     currentLocation: Location;
+    rollState: RollState;
 };
 
 /***
@@ -122,7 +157,15 @@ const companionRoster: {[id: string]: Companion} = {
             flirty: '/characters/Niri_Flirty.gif'
         },
         description: 'A Halcyne Mystic. Naive but loyal.',
-        isRoster: true
+        isRoster: true,
+        abilities: {
+            str: 9,
+            dex: 11,
+            con: 10,
+            int: 14,
+            wis: 16,
+            cha: 13
+        }
     }
 };
 const knownLocations: {[id: string]: Location} = {
@@ -148,16 +191,23 @@ const knownLocations: {[id: string]: Location} = {
         isKnown: true
     }
 };
-        const defaultPlayer: PlayerStats = {
+const defaultPlayer: PlayerStats = {
     hp: 20,
     maxHp: 20,
     mp: 10,
     maxMp: 10,
     level: 1,
     xp: 0,
-    gold: 50,
-    inventory: ['Rusty sword', 'Leather armor', 'Healing potion']
-};
+    inventory: ['Rusty sword', 'Leather armor', 'Healing potion'],
+    abilities: {
+        str: 12,
+        dex: 14,
+        con: 12,
+        int: 10,
+        wis: 13,
+        cha: 11
+    }
+};        
 
 // Niri starts in the party. To start with an empty party instead, set this to [].
 const defaultActiveCompanions: Companion[] = [companionRoster.niri];
@@ -168,6 +218,7 @@ this.myInternalState = {
     companionRoster: companionRoster,
     currentLocation: messageState?.currentLocation ?? knownLocations.tavern,
     knownLocations: knownLocations,
+    rollState: messageState?.rollState ?? {kind: 'idle'},
     numUsers: Object.keys(users).length,
     numChars: Object.keys(characters).length
 };
@@ -214,6 +265,115 @@ this.myInternalState = {
     </svg>`;
     return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
+formatModifier(score: number): string {
+    const mod = Math.floor((score - 10) / 2);
+    return mod >= 0 ? `+${mod}` : `${mod}`;
+}
+
+formatRollBlock(): string {
+    const rs: RollState = this.myInternalState['rollState'];
+    if (rs.kind === 'idle') return 'No active roll.';
+    if (rs.kind === 'pending') {
+        const r = rs.request;
+        const dcStr = r.dc !== undefined ? ` (DC ${r.dc})` : '';
+        const forStr = r.forCompanion ? ` for ${r.forCompanion}` : '';
+        return `Awaiting player to resolve: ${r.ability.toUpperCase()}${dcStr}${forStr} — ${r.reason}. DO NOT request another roll. Wait for the result.`;
+    }
+    const r = rs.result;
+    const dcStr = r.dc !== undefined ? ` vs DC ${r.dc}` : '';
+    const succStr = r.success === true ? ' [SUCCESS]' : r.success === false ? ' [FAILURE]' : '';
+    const advText = r.advantage === 'normal' ? '' : ` (${r.advantage})`;
+    const forStr = r.forCompanion ? ` for ${r.forCompanion}` : '';
+    return `Just resolved${forStr}: ${r.ability.toUpperCase()}${advText}${dcStr} — rolled ${r.raw} ${r.modifier >= 0 ? '+' : ''}${r.modifier} = ${r.total}${succStr}. Reason: ${r.reason}. Narrate the outcome based on this result; do not request a new roll for the same situation.`;
+}
+
+resolveRoll(advantage: 'normal' | 'advantage' | 'disadvantage'): void {
+    const state: RollState = this.myInternalState['rollState'];
+    if (state.kind !== 'pending') {
+        return;
+    }
+    const req = state.request;
+
+    let abilities: AbilityScores | undefined;
+    if (req.forCompanion) {
+        const companion = (this.myInternalState['activeCompanions'] as Companion[])
+            .find(c => c.id === req.forCompanion);
+        abilities = companion?.abilities;
+    } else {
+        abilities = this.myInternalState['player'].abilities;
+    }
+
+    if (!abilities || !(req.ability in abilities)) {
+        console.warn(`Stage: cannot resolve roll — ability "${req.ability}" not found`);
+        return;
+    }
+
+    const score = abilities[req.ability as keyof AbilityScores];
+    const modifier = Math.floor((score - 10) / 2);
+
+    const roll = (): number => Math.floor(Math.random() * 20) + 1;
+    let raw: number;
+    if (advantage === 'normal') raw = roll();
+    else if (advantage === 'advantage') raw = Math.max(roll(), roll());
+    else raw = Math.min(roll(), roll());
+
+    const total = raw + modifier;
+    const result: RollResult = {
+        ability: req.ability,
+        dc: req.dc,
+        reason: req.reason,
+        forCompanion: req.forCompanion,
+        raw,
+        modifier,
+        total,
+        advantage,
+        success: req.dc !== undefined ? total >= req.dc : undefined
+    };
+
+    this.myInternalState['rollState'] = {kind: 'resolved', result};
+}
+
+freeRoll(ability: string, advantage: 'normal' | 'advantage' | 'disadvantage'): void {
+    this.myInternalState['rollState'] = {
+        kind: 'pending',
+        request: {ability, reason: 'Player-declared check'}
+    };
+    this.resolveRoll(advantage);
+}
+
+parseRollRequest(content: string): RollRequest | null {
+    const parts = content.split(',').map(s => s.trim()).filter(s => s.length > 0);
+    const fields: {[key: string]: string} = {};
+    for (const p of parts) {
+        const eq = p.indexOf('=');
+        if (eq < 0) continue;
+        const key = p.substring(0, eq).trim().toLowerCase();
+        const val = p.substring(eq + 1).trim();
+        fields[key] = val;
+    }
+    if (!fields.ability) {
+        console.warn('Stage: ROLL_REQUEST missing ability');
+        return null;
+    }
+    const ability = fields.ability.toLowerCase();
+    const validAbilities = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
+    if (!validAbilities.includes(ability)) {
+        console.warn('Stage: ROLL_REQUEST has unknown ability:', ability);
+        return null;
+    }
+    const req: RollRequest = {
+        ability,
+        reason: fields.reason || 'a check'
+    };
+    if (fields.dc) {
+        const dc = parseInt(fields.dc, 10);
+        if (!isNaN(dc)) req.dc = dc;
+    }
+    if (fields.for) {
+        req.forCompanion = fields.for.toLowerCase();
+    }
+    return req;
+}
 locationPlaceholder(name: string, color1: string, color2: string): string {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180">
         <defs>
@@ -237,7 +397,12 @@ formatStatsForPrompt(): string {
 
     const companionLines = companions.length === 0
         ? 'No active companions.'
-        : companions.map(c => `- ${c.name} (id: ${c.id}, mood: ${c.mood})`).join('\n');
+        : companions.map(c => {
+            const abilityStr = c.abilities
+                ? ` | STR ${c.abilities.str} (${this.formatModifier(c.abilities.str)}), DEX ${c.abilities.dex} (${this.formatModifier(c.abilities.dex)}), CON ${c.abilities.con} (${this.formatModifier(c.abilities.con)}), INT ${c.abilities.int} (${this.formatModifier(c.abilities.int)}), WIS ${c.abilities.wis} (${this.formatModifier(c.abilities.wis)}), CHA ${c.abilities.cha} (${this.formatModifier(c.abilities.cha)})`
+                : '';
+            return `- ${c.name} (id: ${c.id}, mood: ${c.mood})${abilityStr}`;
+        }).join('\n');
 
     const validMoods = ['neutral', 'happy', 'exhausted', 'flustered', 'satisfied', 'embarrassed', 'flirty'];
     const knownLocationLines = Object.values(knownLocations)
@@ -248,8 +413,8 @@ formatStatsForPrompt(): string {
 HP: ${player.hp}/${player.maxHp}
 MP: ${player.mp}/${player.maxMp}
 Level: ${player.level}, XP: ${player.xp}
-Gold: ${player.gold}
 Inventory: ${inv}
+Abilities: STR ${player.abilities.str} (${this.formatModifier(player.abilities.str)}), DEX ${player.abilities.dex} (${this.formatModifier(player.abilities.dex)}), CON ${player.abilities.con} (${this.formatModifier(player.abilities.con)}), INT ${player.abilities.int} (${this.formatModifier(player.abilities.int)}), WIS ${player.abilities.wis} (${this.formatModifier(player.abilities.wis)}), CHA ${player.abilities.cha} (${this.formatModifier(player.abilities.cha)})
 [/CURRENT PLAYER STATE]
 
 [ACTIVE COMPANIONS]
@@ -264,12 +429,27 @@ ${location.name} (id: ${location.id})
 ${knownLocationLines}
 [/KNOWN LOCATIONS]
 
+[ROLL]
+${this.formatRollBlock()}
+[/ROLL]
+
 You MUST end every response with a state update block in this exact format on its own line:
-[STATE: hp=N, gold+=N, inventory+=ItemName, companion.id.mood=mood, companion+=Name, companion-=id, location=LocationNameOrId]
+[STATE: hp=N, inventory+=ItemName, companion.id.mood=mood, companion+=Name, companion-=id, location=LocationNameOrId]
+
+When the player attempts something with meaningful uncertainty, you may also include a roll request, on its own line:
+[ROLL_REQUEST: ability=wis, dc=15, reason=spotting hidden tracks]
+
+Roll request rules:
+- ability is required: str, dex, con, int, wis, or cha (lowercase).
+- dc is optional but recommended. Easy 10, medium 15, hard 20, very hard 25.
+- reason is required: a short phrase explaining what the check is for.
+- for=companion_id is optional: ask a companion to roll instead of the player.
+- Maximum one [ROLL_REQUEST] per response. After requesting, end your narration on a moment of suspense — DO NOT preempt the outcome.
+- Roll for things with stakes (combat, perception, persuasion, athletic feats, lore). Don't roll for trivial actions.
 
 Player rules:
-- Use = to set (hp=15), += to add (gold+=10), -= to subtract or remove (inventory-=Healing potion).
-- Numeric fields: hp, maxHp, mp, maxMp, level, xp, gold.
+- Use = to set (hp=15), += to add (xp+=50), -= to subtract or remove (inventory-=Healing potion).
+- Numeric fields: hp, maxHp, mp, maxMp, level, xp.
 - Inventory: items are strings; remove by exact name match.
 
 Companion rules:
@@ -281,22 +461,48 @@ Location rules:
 - To change location, use location=<id or display name>. If it matches a known location id or name, full details are used. Otherwise it's treated as a new unknown place.
 - Only emit location= when the party actually moves to a new place. Don't emit it for stays.
 
+Roll interpretation:
+- The [ROLL] block above tells you the roll status.
+- "No active roll" — fine to request one if appropriate, otherwise ignore.
+- "Awaiting player to resolve..." — you already asked. Continue the scene with suspense, do NOT narrate an outcome, do NOT request another roll.
+- "Just resolved..." — narrate the outcome and move the scene forward. Use these guidelines:
+  * Natural 1 (raw): notable mishap regardless of total
+  * Natural 20 (raw): notable success regardless of total
+  * If a DC was set: [SUCCESS] meets/exceeds the bar; [FAILURE] falls short. Margins matter — beating DC by 10+ is a triumph; missing by 10+ is disastrous.
+  * If no DC: total 1-5 poor, 6-10 middling with cost, 11-15 solid, 16-20 clean, 21+ exceptional.
+  * Don't let dice override common sense. A natural 20 to lift a mountain still fails interestingly.
+
 General rules:
 - Only include fields that changed.
 - If nothing changed, output [STATE: ] with nothing inside.
-- Do not invent fields beyond those listed.`;
+- - Do not invent fields beyond those listed.`;
 }
             parseStateUpdate(text: string): {cleanedText: string, applied: boolean} {
-    // Find the state block. Case-insensitive, allows trailing whitespace/newlines.
+    // First: strip and parse any roll request.
+    const rollRegex = /\[ROLL_REQUEST:([^\]]*)\]/i;
+    const rollMatch = text.match(rollRegex);
+    let workingText = text;
+    let appliedRoll = false;
+    if (rollMatch) {
+        const reqContent = rollMatch[1].trim();
+        const parsed = this.parseRollRequest(reqContent);
+        if (parsed) {
+            this.myInternalState['rollState'] = {kind: 'pending', request: parsed};
+            appliedRoll = true;
+        }
+        workingText = workingText.replace(rollRegex, '').trim();
+    }
+
+    // Then: find the state block in the (possibly stripped) text.
     const stateRegex = /\[STATE:([^\]]*)\]/i;
-    const match = text.match(stateRegex);
+    const match = workingText.match(stateRegex);
 
     if (!match) {
-        return {cleanedText: text, applied: false};
+        return {cleanedText: workingText, applied: appliedRoll};
     }
 
     const stateContent = match[1].trim();
-    const cleanedText = text.replace(stateRegex, '').trim();
+    const cleanedText = workingText.replace(stateRegex, '').trim();
 
     // Empty state block means "nothing changed" — that's valid.
     if (stateContent === '') {
@@ -362,7 +568,7 @@ General rules:
 }
 
 applyDelta(player: PlayerStats, field: string, value: string, op: 'set' | 'add' | 'subtract'): void {
-    const numericFields = ['hp', 'maxHp', 'mp', 'maxMp', 'level', 'xp', 'gold'];
+    const numericFields = ['hp', 'maxHp', 'mp', 'maxMp', 'level', 'xp'];
 
     if (field === 'inventory') {
         const itemName = value.trim();
@@ -497,7 +703,14 @@ applyLocationChange(nameOrId: string): void {
               in this chat, but NOT their Chub ID. ***/
             isBot             /*** @type: boolean
              @description Whether this is itself from another bot, ex. in a group chat. ***/
-        } = userMessage;
+} = userMessage;
+
+        // Once the player sends a message after a resolved roll, clear it so it doesn't linger.
+        const rs: RollState = this.myInternalState['rollState'];
+        if (rs.kind === 'resolved') {
+            this.myInternalState['rollState'] = {kind: 'idle'};
+        }
+
         return {
             /*** @type null | string @description A string to add to the
              end of the final prompt sent to the LLM,
@@ -508,7 +721,8 @@ applyLocationChange(nameOrId: string): void {
             messageState: {
                 player: this.myInternalState['player'],
                 activeCompanions: this.myInternalState['activeCompanions'],
-                currentLocation: this.myInternalState['currentLocation']
+                currentLocation: this.myInternalState['currentLocation'],
+                rollState: this.myInternalState['rollState']
             },
             /*** @type null | string @description If not null, the user's message itself is replaced
              with this value, both in what's sent to the LLM and in the database. ***/
@@ -551,7 +765,8 @@ applyLocationChange(nameOrId: string): void {
             messageState: {
                 player: this.myInternalState['player'],
                 activeCompanions: this.myInternalState['activeCompanions'],
-                currentLocation: this.myInternalState['currentLocation']
+                currentLocation: this.myInternalState['currentLocation'],
+                rollState: this.myInternalState['rollState']
             },
             /*** @type null | string @description If not null, the bot's response itself is replaced
              with this value, both in what's sent to the LLM subsequently and in the database. ***/
@@ -611,7 +826,34 @@ render(): ReactElement {
             <div>MP: <span style={{color: '#6bb6ff'}}>{player.mp}/{player.maxMp}</span></div>
             <div>Lvl: <span style={{color: '#ffd56b'}}>{player.level}</span></div>
             <div>XP: {player.xp}</div>
-            <div>Gold: <span style={{color: '#ffd56b'}}>{player.gold}</span></div>
+        </div>
+
+        <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(6, 1fr)',
+            gap: '6px',
+            marginBottom: '12px',
+            fontSize: '11px'
+        }}>
+            {[
+                {label: 'STR', value: player.abilities.str},
+                {label: 'DEX', value: player.abilities.dex},
+                {label: 'CON', value: player.abilities.con},
+                {label: 'INT', value: player.abilities.int},
+                {label: 'WIS', value: player.abilities.wis},
+                {label: 'CHA', value: player.abilities.cha}
+            ].map(stat => (
+                <div key={stat.label} style={{
+                    background: 'rgba(0,0,0,0.3)',
+                    borderRadius: '4px',
+                    padding: '4px',
+                    textAlign: 'center'
+                }}>
+                    <div style={{fontSize: '10px', color: '#aaa'}}>{stat.label}</div>
+                    <div style={{fontSize: '14px', fontWeight: 'bold'}}>{this.formatModifier(stat.value)}</div>
+                    <div style={{fontSize: '9px', color: '#777'}}>{stat.value}</div>
+                </div>
+            ))}
         </div>
 
         <div>
@@ -622,6 +864,120 @@ render(): ReactElement {
                     {player.inventory.map((item, i) => <li key={i}>{item}</li>)}
                 </ul>}
         </div>
+        {(() => {
+            const rs: RollState = this.myInternalState['rollState'];
+            const showFreeRoll: boolean = this.myInternalState['showFreeRoll'] ?? false;
+
+            const refresh = () => {
+                this.myInternalState = {...this.myInternalState};
+                window.location.reload();
+            };
+
+            const baseBtn = {
+                fontSize: '11px',
+                padding: '4px 10px',
+                cursor: 'pointer',
+                background: '#2a2a2a',
+                color: '#e0e0e0',
+                border: '1px solid #444',
+                borderRadius: '3px'
+            };
+
+            const sectionStyle = {
+                marginTop: '12px',
+                paddingTop: '8px',
+                borderTop: '1px solid #444'
+            };
+
+            if (rs.kind === 'pending') {
+                const r = rs.request;
+                const dcStr = r.dc !== undefined ? ` (DC ${r.dc})` : '';
+                const forStr = r.forCompanion ? ` — ${r.forCompanion}` : '';
+                return (
+                    <div style={sectionStyle}>
+                        <div style={{fontSize: '12px', color: '#ffd56b', marginBottom: '4px'}}>
+                            Roll requested: <strong>{r.ability.toUpperCase()}</strong>{dcStr}{forStr}
+                        </div>
+                        <div style={{fontSize: '11px', color: '#bbb', marginBottom: '8px', fontStyle: 'italic'}}>
+                            {r.reason}
+                        </div>
+                        <div style={{display: 'flex', gap: '6px', flexWrap: 'wrap'}}>
+                            <button style={baseBtn} onClick={() => { this.resolveRoll('normal'); refresh(); }}>Roll</button>
+                            <button style={baseBtn} onClick={() => { this.resolveRoll('advantage'); refresh(); }}>w/ Adv</button>
+                            <button style={baseBtn} onClick={() => { this.resolveRoll('disadvantage'); refresh(); }}>w/ Dis</button>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (rs.kind === 'resolved') {
+                const r = rs.result;
+                const isCrit = r.raw === 20;
+                const isFumble = r.raw === 1;
+                const totalColor = isCrit ? '#ffd56b' : isFumble ? '#ff6b6b' : '#e0e0e0';
+                const dcStr = r.dc !== undefined ? ` vs DC ${r.dc}` : '';
+                const succStr = r.success === true ? ' ✓' : r.success === false ? ' ✗' : '';
+                const succColor = r.success === true ? '#aac46b' : r.success === false ? '#ff6b6b' : '#e0e0e0';
+                const advText = r.advantage === 'normal' ? '' : ` (${r.advantage})`;
+                return (
+                    <div style={sectionStyle}>
+                        <div style={{fontSize: '12px', color: '#aaa', marginBottom: '4px'}}>
+                            Last roll: <strong>{r.ability.toUpperCase()}</strong>{advText}{dcStr}
+                        </div>
+                        <div style={{fontSize: '11px', color: '#bbb', marginBottom: '4px', fontStyle: 'italic'}}>
+                            {r.reason}
+                        </div>
+                        <div style={{fontSize: '14px'}}>
+                            {r.raw} {r.modifier >= 0 ? '+' : ''}{r.modifier} = <strong style={{color: totalColor}}>{r.total}</strong>
+                            <span style={{color: succColor, marginLeft: '6px'}}>{succStr}</span>
+                            {isCrit && <span style={{color: '#ffd56b', marginLeft: '6px'}}>★ Crit</span>}
+                            {isFumble && <span style={{color: '#ff6b6b', marginLeft: '6px'}}>✗ Fumble</span>}
+                        </div>
+                        <div style={{fontSize: '10px', color: '#666', marginTop: '6px'}}>
+                            (Send your next message — the GM will react.)
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div style={sectionStyle}>
+                    {!showFreeRoll ? (
+                        <button
+                            style={{...baseBtn, fontSize: '10px', padding: '3px 8px'}}
+                            onClick={() => { this.myInternalState['showFreeRoll'] = true; refresh(); }}
+                        >
+                            Free roll…
+                        </button>
+                    ) : (
+                        <div>
+                            <div style={{fontSize: '11px', color: '#aaa', marginBottom: '4px'}}>Pick an ability:</div>
+                            <div style={{display: 'flex', gap: '4px', flexWrap: 'wrap'}}>
+                                {['str', 'dex', 'con', 'int', 'wis', 'cha'].map(ab => (
+                                    <button
+                                        key={ab}
+                                        style={{...baseBtn, flex: '1'}}
+                                        onClick={() => {
+                                            this.freeRoll(ab, 'normal');
+                                            this.myInternalState['showFreeRoll'] = false;
+                                            refresh();
+                                        }}
+                                    >
+                                        {ab.toUpperCase()}
+                                    </button>
+                                ))}
+                            </div>
+                            <button
+                                style={{...baseBtn, fontSize: '10px', marginTop: '6px'}}
+                                onClick={() => { this.myInternalState['showFreeRoll'] = false; refresh(); }}
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    )}
+                </div>
+            );
+        })()}
         <div style={{
     marginTop: '12px',
     borderTop: '1px solid #444',
@@ -682,13 +1038,14 @@ render(): ReactElement {
         `Niri yawns deeply, the day catching up to her. [STATE: companion.niri.mood=exhausted]`,
         `A mysterious stranger joins your party. [STATE: companion+=Hooded Figure]`,
         `The hooded figure vanishes into the night. [STATE: companion-=Hooded Figure]`,
-        `You strike a goblin and find loot. [STATE: hp-=3, gold+=15, xp+=50, inventory+=Goblin tooth, companion.niri.mood=satisfied]`,
+        `You strike a goblin and find loot. [STATE: hp-=3, xp+=50, inventory+=Goblin tooth, companion.niri.mood=satisfied]`,
         `Niri parts ways for now. [STATE: companion-=niri]`,
         `Niri returns with renewed purpose. [STATE: companion+=Niri]`,
         `You step out of the tavern and into the woods. [STATE: location=forest]`,
         `The path leads you back to the road. [STATE: location=The King's Road]`,
         `You arrive at a strange ruin you've never seen before. [STATE: location=The Sunken Tower]`,
-        `You return to the warmth of the tavern. [STATE: location=tavern]`
+        `You return to the warmth of the tavern. [STATE: location=tavern]`,
+        `A trapdoor creaks beneath your boot. You notice the give just in time. [ROLL_REQUEST: ability=dex, dc=14, reason=avoiding a triggered floor trap] [STATE: ]`
     ];
     const counter = (this.myInternalState['testCounter'] || 0) % scenarios.length;
     const fakeReply = scenarios[counter];
