@@ -22,7 +22,9 @@ type PlayerStats = {
     abilities: AbilityScores;
     seeds: number;
     maxSeeds: number;
-    tome: string[];  // spell IDs the player has learned
+    tome: string[];           // spell IDs the player has learned
+    classId: string;          // current class id (e.g. 'ranger')
+    pendingAbilityPoint: boolean;  // true if a free +1 is waiting to be spent
 };
 
 type AbilityScores = {
@@ -33,6 +35,86 @@ type AbilityScores = {
     wis: number;
     cha: number;
 };
+
+type AbilityKey = keyof AbilityScores;
+
+// Class trait scaling — what gets +1 per N levels.
+type ClassTraitTarget = 'maxHp' | 'maxSeeds' | 'perception' | 'social' | 'combat';
+
+type CharacterClass = {
+    id: string;                    // lowercase, e.g. 'ranger'
+    name: string;                  // display name, e.g. 'Ranger'
+    description: string;           // for AI narration
+    strengths: AbilityKey[];       // each gets +1 to rolls in that ability
+    weaknesses: AbilityKey[];      // each gets -1 to rolls
+    traitName: string;             // display name for the scaling trait
+    traitDescription: string;      // what the trait does
+    traitTarget: ClassTraitTarget; // what the trait scales
+    traitPerLevels: number;        // +1 per N levels (3 in your design)
+};
+
+// Predefined classes. Add or modify entries here.
+const CHARACTER_CLASSES: {[id: string]: CharacterClass} = {
+    ranger: {
+        id: 'ranger',
+        name: 'Ranger',
+        description: 'A wilderness scout — observant, light on their feet, more comfortable in trees than in courts.',
+        strengths: ['dex', 'wis'],
+        weaknesses: ['cha'],
+        traitName: 'Tracker',
+        traitDescription: 'Bonus to perception, tracking, and awareness rolls.',
+        traitTarget: 'perception',
+        traitPerLevels: 3
+    },
+    mystic: {
+        id: 'mystic',
+        name: 'Mystic',
+        description: 'A practitioner of inward magic — insightful and patient, but physically slight.',
+        strengths: ['wis'],
+        weaknesses: ['str'],
+        traitName: 'Deep Well',
+        traitDescription: 'Extra max seed capacity beyond normal level scaling.',
+        traitTarget: 'maxSeeds',
+        traitPerLevels: 3
+    },
+    soldier: {
+        id: 'soldier',
+        name: 'Soldier',
+        description: 'A trained fighter — hardy and direct, suspicious of subtlety.',
+        strengths: ['str', 'con'],
+        weaknesses: ['int'],
+        traitName: 'Hardened',
+        traitDescription: 'Extra max HP beyond normal level scaling.',
+        traitTarget: 'maxHp',
+        traitPerLevels: 3
+    },
+    trickster: {
+        id: 'trickster',
+        name: 'Trickster',
+        description: 'A rogue, performer, or charmer — quick of hand and tongue, often misjudging when to stop.',
+        strengths: ['dex', 'cha'],
+        weaknesses: ['wis'],
+        traitName: 'Quick Tongue',
+        traitDescription: 'Bonus to persuasion, deception, and performance rolls.',
+        traitTarget: 'social',
+        traitPerLevels: 3
+    },
+    warden: {
+        id: 'warden',
+        name: 'Warden',
+        description: 'A defender — disciplined, dependable, slow to act but unstoppable when committed.',
+        strengths: ['con', 'wis'],
+        weaknesses: ['dex'],
+        traitName: 'Iron Stand',
+        traitDescription: 'Bonus to combat rolls when defending or holding ground.',
+        traitTarget: 'combat',
+        traitPerLevels: 3
+    }
+};
+
+// Cumulative XP cost for each level, starting at level 2.
+// Index 0 = XP needed to reach level 2, index 1 = level 3, etc.
+const LEVEL_XP_COSTS: number[] = [100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800];
 
 type RollRequest = {
     ability: string;
@@ -222,7 +304,7 @@ const companionRoster: {[id: string]: Companion} = {
             embarrassed: '/characters/Niri_Embarrassed.gif',
             flirty: '/characters/Niri_Flirty.gif'
         },
-        description: 'A Halcyne Mystic. Naive but loyal.',
+        description: 'A Halcyne Mystic. Naive but loyal. As a harpy, on even-numbered days her body produces an unfertilized clutch of 4-6 eggs - She may seem uncomfortable and restless until the eggs are layed. Bond level 2 or higher, will want ((user)) to watch her lay the eggs.',
         isRoster: true,
         abilities: {
             str: 9,
@@ -301,7 +383,9 @@ const defaultPlayer: PlayerStats = {
     },
     seeds: 6,    // base 5 + level 1
     maxSeeds: 6,
-    tome: []     // empty grimoire to start
+    tome: [],    // empty grimoire to start
+    classId: 'ranger',  // default class — player can change in chat 0
+    pendingAbilityPoint: false
 };
 
 // Niri starts in the party. To start with an empty party instead, set this to [].
@@ -318,7 +402,9 @@ const mergedPlayer: PlayerStats = savedPlayer
         // Backfill seed fields. If they're missing, scale to current level.
         maxSeeds: savedPlayer.maxSeeds ?? computeMaxSeeds(savedPlayer.level ?? 1),
         seeds: savedPlayer.seeds ?? computeMaxSeeds(savedPlayer.level ?? 1),
-        tome: savedPlayer.tome ?? []
+        tome: savedPlayer.tome ?? [],
+        classId: savedPlayer.classId ?? 'ranger',
+        pendingAbilityPoint: savedPlayer.pendingAbilityPoint ?? false
     }
     : defaultPlayer;
 
@@ -407,7 +493,9 @@ this.myInternalState = {
                 },
                 seeds: incomingPlayer.seeds ?? currentPlayer.seeds,
                 maxSeeds: incomingPlayer.maxSeeds ?? currentPlayer.maxSeeds,
-                tome: incomingPlayer.tome ?? currentPlayer.tome ?? []
+                tome: incomingPlayer.tome ?? currentPlayer.tome ?? [],
+                classId: incomingPlayer.classId ?? currentPlayer.classId ?? 'ranger',
+                pendingAbilityPoint: incomingPlayer.pendingAbilityPoint ?? currentPlayer.pendingAbilityPoint ?? false
             }
             : currentPlayer;
 
@@ -504,7 +592,17 @@ resolveRoll(advantage: 'normal' | 'advantage' | 'disadvantage'): void {
     }
 
     const score = abilities[req.ability as keyof AbilityScores];
-    const modifier = Math.floor((score - 10) / 2);
+    let modifier = Math.floor((score - 10) / 2);
+
+    // Apply class strength/weakness modifiers — only for player rolls, not companions.
+    if (!req.forCompanion) {
+        const player: PlayerStats = this.myInternalState['player'];
+        const cls = CHARACTER_CLASSES[player.classId];
+        if (cls) {
+            if (cls.strengths.includes(req.ability as AbilityKey)) modifier += 1;
+            if (cls.weaknesses.includes(req.ability as AbilityKey)) modifier -= 1;
+        }
+    }
 
     const roll = (): number => Math.floor(Math.random() * 20) + 1;
     let raw: number;
@@ -642,11 +740,25 @@ formatStatsForPrompt(): string {
         .map(l => `- ${l.name} (id: ${l.id})`)
         .join('\n');
 
+    const cls = CHARACTER_CLASSES[player.classId];
+    const classLine = cls
+        ? `${cls.name} — ${cls.description} Strengths: ${cls.strengths.map(s => s.toUpperCase()).join(', ')}. Weakness: ${cls.weaknesses.map(s => s.toUpperCase()).join(', ')}. ${cls.traitName} (${cls.traitDescription})`
+        : 'Unclassed';
+    const xpToNext = LEVEL_XP_COSTS[player.level - 1];
+    const xpStr = xpToNext !== undefined ? `${player.xp}/${xpToNext}` : `${player.xp} (max level)`;
+    const levelUpHint = this.myInternalState['justLeveled']
+        ? '\n** The player just leveled up. Narrate a brief, grounded moment of growth — a new resolve, a companion noticing the change, a small private confidence. Don\'t make it grandiose. **'
+        : '';
+    const abilityPointHint = player.pendingAbilityPoint
+        ? '\n** The player has an unspent ability point waiting. They\'ll choose where to spend it via the UI. Don\'t narrate it being spent until you see it reflected in the stats. **'
+        : '';
+
     return `[CURRENT PLAYER STATE]
 HP: ${player.hp}/${player.maxHp}
 MP: ${player.mp}/${player.maxMp}
 Seeds: ${player.seeds}/${player.maxSeeds}
-Level: ${player.level}, XP: ${player.xp}
+Class: ${classLine}
+Level: ${player.level}, XP: ${xpStr}${levelUpHint}${abilityPointHint}
 Inventory: ${inv}
 Abilities: STR ${player.abilities.str} (${this.formatModifier(player.abilities.str)}), DEX ${player.abilities.dex} (${this.formatModifier(player.abilities.dex)}), CON ${player.abilities.con} (${this.formatModifier(player.abilities.con)}), INT ${player.abilities.int} (${this.formatModifier(player.abilities.int)}), WIS ${player.abilities.wis} (${this.formatModifier(player.abilities.wis)}), CHA ${player.abilities.cha} (${this.formatModifier(player.abilities.cha)})
 [/CURRENT PLAYER STATE]
@@ -668,7 +780,7 @@ ${location.name} (id: ${location.id})
 [/CURRENT LOCATION]
 
 [CURRENT TIME]
-Day ${(this.myInternalState['timeState'] as TimeState).day}, ${(this.myInternalState['timeState'] as TimeState).period.replace('_', ' ')}
+Day ${(this.myInternalState['timeState'] as TimeState).day}, ${(this.myInternalState['timeState'] as TimeState).period.replace('_', ' ')}${(this.myInternalState['timeState'] as TimeState).day % 2 === 0 ? ' (even day)' : ' (odd day)'}
 [/CURRENT TIME]
 
 [KNOWN LOCATIONS]
@@ -944,17 +1056,11 @@ General rules:
     player.mp = Math.max(0, Math.min(player.mp, player.maxMp));
     player.seeds = Math.max(0, Math.min(player.seeds, player.maxSeeds));
 
-    // If level changed and the player's maxSeeds wasn't explicitly set this turn, scale it.
-    // We detect this by comparing to what level-based max would be.
-    const expectedMax = computeMaxSeeds(player.level);
-    if (player.maxSeeds < expectedMax) {
-        // Level went up — grant the new max as a small surprise refill.
-        const gain = expectedMax - player.maxSeeds;
-        player.maxSeeds = expectedMax;
-        player.seeds = Math.min(player.maxSeeds, player.seeds + gain);
-    }
-
     this.myInternalState['player'] = player;
+
+    // After updates land, check if XP crossed any level thresholds.
+    this.checkLevelUp();
+
     return {cleanedText, applied: true};
 }
 
@@ -1151,6 +1257,87 @@ dismissSpellChoice(): void {
     console.log('Stage: spell choice dismissed.');
 }
 
+// Compute level-relevant bonuses from class trait scaling.
+// Returns the additive boost the class gives at the player's current level
+// for each trait target.
+classTraitBonuses(level: number, classId: string): {[target in ClassTraitTarget]?: number} {
+    const cls = CHARACTER_CLASSES[classId];
+    if (!cls) return {};
+    const ticks = Math.floor(level / cls.traitPerLevels);
+    return {[cls.traitTarget]: ticks};
+}
+
+// Recompute maxHp and maxSeeds from base + level + class trait.
+// Returns the recomputed values without mutating state.
+computeDerivedStats(level: number, classId: string): {maxHp: number; maxSeeds: number} {
+    const baseMaxHp = 20 + (level - 1) * 2;  // start 20, +2 per level after 1
+    const baseMaxSeeds = computeMaxSeeds(level);
+    const traits = this.classTraitBonuses(level, classId);
+    return {
+        maxHp: baseMaxHp + (traits.maxHp ?? 0),
+        maxSeeds: baseMaxSeeds + (traits.maxSeeds ?? 0)
+    };
+}
+
+// Check XP and apply level-ups if thresholds were crossed.
+// Returns true if at least one level was gained.
+checkLevelUp(): boolean {
+    const player: PlayerStats = {...this.myInternalState['player']};
+    let leveled = false;
+    while (player.level - 1 < LEVEL_XP_COSTS.length && player.xp >= LEVEL_XP_COSTS[player.level - 1]) {
+        player.xp -= LEVEL_XP_COSTS[player.level - 1];
+        player.level++;
+        leveled = true;
+        // Free ability point every 3rd level (3, 6, 9, 12...).
+        if (player.level % 3 === 0) {
+            player.pendingAbilityPoint = true;
+        }
+        console.log(`Stage: leveled up to ${player.level}.`);
+    }
+    if (leveled) {
+        // Recompute and apply derived caps. Heal to new max as a level-up reward.
+        const derived = this.computeDerivedStats(player.level, player.classId);
+        player.maxHp = derived.maxHp;
+        player.maxSeeds = derived.maxSeeds;
+        player.hp = player.maxHp;
+        player.seeds = player.maxSeeds;
+        this.myInternalState['player'] = player;
+        // Flag for the AI's next turn to narrate the moment.
+        this.myInternalState['justLeveled'] = true;
+    }
+    return leveled;
+}
+
+spendAbilityPoint(target: AbilityKey): void {
+    const player: PlayerStats = {...this.myInternalState['player']};
+    if (!player.pendingAbilityPoint) {
+        console.warn('Stage: no pending ability point to spend.');
+        return;
+    }
+    player.abilities = {...player.abilities, [target]: player.abilities[target] + 1};
+    player.pendingAbilityPoint = false;
+    this.myInternalState['player'] = player;
+    console.log(`Stage: ability point spent on ${target.toUpperCase()} (now ${player.abilities[target]}).`);
+}
+
+// Switch the player's class. Recalculates derived stats but doesn't refund anything.
+setClass(classId: string): void {
+    if (!(classId in CHARACTER_CLASSES)) {
+        console.warn(`Stage: unknown class "${classId}".`);
+        return;
+    }
+    const player: PlayerStats = {...this.myInternalState['player']};
+    player.classId = classId;
+    const derived = this.computeDerivedStats(player.level, classId);
+    player.maxHp = derived.maxHp;
+    player.maxSeeds = derived.maxSeeds;
+    // Clamp current to new caps.
+    player.hp = Math.min(player.hp, player.maxHp);
+    player.seeds = Math.min(player.seeds, player.maxSeeds);
+    this.myInternalState['player'] = player;
+    console.log(`Stage: class set to ${classId}.`);
+}
+
 longRest(): void {
     const player: PlayerStats = {...this.myInternalState['player']};
     const beforeSeeds = player.seeds;
@@ -1243,6 +1430,19 @@ setTimePeriod(targetPeriod: TimePeriod): void {
             isBot             /*** @type: boolean
              @description Whether this is itself from another bot, ex. in a group chat. ***/
 } = userMessage;
+
+        // Clear the just-leveled hint once the AI has seen it.
+        // We don't want it nagging on every subsequent turn.
+        if (this.myInternalState['justLeveled']) {
+            // Was set last turn; the AI just saw it. Clear after this turn's prompt builds.
+            // We clear after building, so we move it from "set" to "shown" via a second flag.
+            if (this.myInternalState['levelUpShown']) {
+                this.myInternalState['justLeveled'] = false;
+                this.myInternalState['levelUpShown'] = false;
+            } else {
+                this.myInternalState['levelUpShown'] = true;
+            }
+        }
 
         // Clear resolved rolls only after the AI has had a chance to see them.
         // We use a "seen" flag stored alongside rollState to track this.
@@ -1402,13 +1602,60 @@ renderInner(): ReactElement {
     );
 })()}
 
+        {(() => {
+            const cls = CHARACTER_CLASSES[player.classId];
+            return (
+                <div style={{fontSize: '11px', color: '#bbb', marginBottom: '6px'}}>
+                    <strong style={{color: '#e0e0e0'}}>{cls?.name ?? '—'}</strong>
+                    {cls && <span style={{color: '#888'}}> · {cls.traitName}</span>}
+                </div>
+            );
+        })()}
+
         <div style={{display: 'flex', gap: '16px', flexWrap: 'wrap', marginBottom: '8px'}}>
             <div>HP: <span style={{color: '#ff6b6b'}}>{player.hp}/{player.maxHp}</span></div>
             <div>MP: <span style={{color: '#6bb6ff'}}>{player.mp}/{player.maxMp}</span></div>
             <div>Lvl: <span style={{color: '#ffd56b'}}>{player.level}</span></div>
-            <div>XP: {player.xp}</div>
+            <div>XP: {player.xp}{LEVEL_XP_COSTS[player.level - 1] !== undefined ? `/${LEVEL_XP_COSTS[player.level - 1]}` : ''}</div>
             <div>Seeds: <span style={{color: '#aac46b'}}>{player.seeds}/{player.maxSeeds}</span></div>
         </div>
+
+        {player.pendingAbilityPoint && (
+            <div style={{
+                marginBottom: '8px',
+                padding: '8px',
+                border: '1px solid #ffd56b',
+                borderRadius: '6px',
+                background: 'rgba(80, 60, 20, 0.4)'
+            }}>
+                <div style={{fontSize: '12px', fontWeight: 'bold', color: '#ffd56b', marginBottom: '4px'}}>
+                    Ability point ready
+                </div>
+                <div style={{fontSize: '11px', color: '#bbb', marginBottom: '6px'}}>
+                    Add +1 to:
+                </div>
+                <div style={{display: 'flex', gap: '4px', flexWrap: 'wrap'}}>
+                    {(['str', 'dex', 'con', 'int', 'wis', 'cha'] as AbilityKey[]).map(ab => (
+                        <button
+                            key={ab}
+                            style={{
+                                fontSize: '11px',
+                                padding: '4px 8px',
+                                cursor: 'pointer',
+                                background: '#2a2a2a',
+                                color: '#e0e0e0',
+                                border: '1px solid #555',
+                                borderRadius: '3px',
+                                flex: '1'
+                            }}
+                            onClick={() => { this.spendAbilityPoint(ab); this.bumpVersion(); }}
+                        >
+                            {ab.toUpperCase()}
+                        </button>
+                    ))}
+                </div>
+            </div>
+        )}
 
         <div style={{marginBottom: '8px'}}>
             <button

@@ -6,6 +6,7 @@ Quick reference for finding things in `src/Stage.tsx`. To use: open the file in 
 
 **Starting a Codespace session:**
 ```
+git pull --no-rebase
 nvm use 21.7.1
 yarn dev
 ```
