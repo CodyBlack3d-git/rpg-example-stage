@@ -161,6 +161,7 @@ type Spell = {
     description: string;     // what the spell does, narratively
     seedCost: number;        // seeds consumed per cast
     bondRequirement: number; // minimum companion bond level for this spell to unlock
+    levelRequirement: number; // minimum player level for this spell to unlock
     effectTags?: string[];   // optional tags like ['heal', 'utility'] — for AI matching
 };
 
@@ -179,11 +180,14 @@ type Companion = {
     moodImages: {[mood: string]: string};
     description?: string;
     isRoster: boolean;
-    abilities?: AbilityScores;  // optional — text-only newcomers don't need them
-    bondLevel?: number;         // 0-10; defaults to 0
-    bondProgress?: number;      // points accumulated toward next level
+    abilities?: AbilityScores;       // optional — text-only newcomers don't need them
+    baseAbilities?: AbilityScores;   // the starting scores before any scaling — set once, never changed
+    primaryStat?: AbilityKey;        // grows +1 at every milestone (levels 3, 6, 9, 12)
+    secondaryStat?: AbilityKey;      // grows +1 at alternate milestones (levels 6, 12)
+    bondLevel?: number;              // 0-10; defaults to 0
+    bondProgress?: number;           // points accumulated toward next level
     socialUnlocks?: SocialUnlock[];  // narrative beats keyed to bond level
-    spellList?: Spell[];        // spells this companion knows; used for bond-up picker
+    spellList?: Spell[];             // spells this companion knows
 };
 
 // Cumulative cost to reach each bond level. Index 0 = cost to reach level 1.
@@ -304,7 +308,7 @@ const companionRoster: {[id: string]: Companion} = {
             embarrassed: '/characters/Niri_Embarrassed.gif',
             flirty: '/characters/Niri_Flirty.gif'
         },
-        description: 'A Halcyne Mystic. Naive but loyal. As a harpy, on even-numbered days her body produces an unfertilized clutch of 4-6 eggs - She may seem uncomfortable and restless until the eggs are layed. Bond level 2 or higher, will want ((user)) to watch her lay the eggs.',
+        description: 'A Halcyne Mystic. Naive but loyal. As a harpy, on even-numbered days her body produces an unfertilized clutch of 4-6 eggs - She may seem uncomfortable and restless until the eggs are layed.',
         isRoster: true,
         abilities: {
             str: 9,
@@ -314,33 +318,293 @@ const companionRoster: {[id: string]: Companion} = {
             wis: 16,
             cha: 13
         },
+        baseAbilities: {
+            str: 9,
+            dex: 11,
+            con: 10,
+            int: 14,
+            wis: 16,
+            cha: 13
+        },
+        primaryStat: 'wis',
+        secondaryStat: 'int',
         bondLevel: 0,
         bondProgress: 0,
         socialUnlocks: [
             // Fill these in later. Example shape:
-            // { bondLevel: 2, description: "Niri shares the name of her home village." },
-            // { bondLevel: 4, description: "Niri starts using a private nickname for the player." }
+            { bondLevel: 2, description: "Niri nervously asks ((user)) if he could start watching her lay eggs." },
+            { bondLevel: 4, description: "Niri admits she does not know how breeding works." }
         ],
         spellList: [
             // Fill these in later. Example shape:
-            // {
-            //     id: 'niri_healing_light',
-            //     name: 'Healing Light',
-            //     description: 'A pulse of pale-blue motes that mends minor wounds.',
-            //     seedCost: 1,
-            //     bondRequirement: 0,
-            //     effectTags: ['heal']
-            // },
+            {
+                id: 'niri_healing_light',
+                name: 'Healing Light',
+                description: 'A pulse of pale-blue motes that mends minor wounds.',
+                seedCost: 1,
+                bondRequirement: 0,
+                levelRequirement: 1,
+                effectTags: ['heal']
+            },
             // {
             //     id: 'niri_warding_breath',
             //     name: 'Warding Breath',
             //     description: 'A whispered prayer that briefly steadies an ally against fear.',
             //     seedCost: 1,
             //     bondRequirement: 2,
+            //     levelRequirement: 1,
             //     effectTags: ['utility', 'social']
             // }
         ]
-    }
+    },
+    vess: {
+        id: 'vess',
+        name: 'Vess',
+        mood: 'neutral',
+        moodImages: {
+            neutral: '/characters/Niri_Neutral.gif',
+            happy: '/characters/Niri_Happy.gif',
+            exhausted: '/characters/Niri_Exhausted.gif',
+            flustered: '/characters/Niri_Flustered.gif',
+            satisfied: '/characters/Niri_Satisfied.gif',
+            embarrassed: '/characters/Niri_Embarrassed.gif',
+            flirty: '/characters/Niri_Flirty.gif'
+        },
+        description: 'A Naga Shadow Dancer. Escaped ogre captivity thanks to ((user)), thinks self grotesque.',
+        isRoster: false,
+        abilities: {
+            str: 14,
+            dex: 12,
+            con: 15,
+            int: 10,
+            wis: 13,
+            cha: 8
+        },
+        baseAbilities: {
+            str: 14,
+            dex: 12,
+            con: 15,
+            int: 10,
+            wis: 13,
+            cha: 8
+        },
+        primaryStat: 'dex',
+        secondaryStat: 'str',
+        bondLevel: 0,
+        bondProgress: 0,
+        socialUnlocks: [
+            // Fill these in later. Example shape:
+            { bondLevel: 2, description: "Vess begins making efforts to fix her hair in a way that doesn't cover her face." },
+            { bondLevel: 4, description: "In private, Vess admits strong desire to experience coiling around someone she trusts." }
+        ],
+        spellList: [
+            // Fill these in later. Example shape:
+            {
+                id: 'vess_poison_paralysis',
+                name: 'Paralysis poison',
+                description: 'Applies a paralysis poison that can stop human sized beings from acting for up to 10 minutes.',
+                seedCost: 1,
+                bondRequirement: 0,
+                levelRequirement: 1,
+                effectTags: ['poison']
+            },
+            // {
+            //     id: 'niri_warding_breath',
+            //     name: 'Warding Breath',
+            //     description: 'A whispered prayer that briefly steadies an ally against fear.',
+            //     seedCost: 1,
+            //     bondRequirement: 2,
+            //     levelRequirement: 1,
+            //     effectTags: ['utility', 'social']
+            // }
+        ]
+    },
+    anket: {
+        id: 'anket',
+        name: 'Anket',
+        mood: 'neutral',
+        moodImages: {
+            neutral: '/characters/Niri_Neutral.gif',
+            happy: '/characters/Niri_Happy.gif',
+            exhausted: '/characters/Niri_Exhausted.gif',
+            flustered: '/characters/Niri_Flustered.gif',
+            satisfied: '/characters/Niri_Satisfied.gif',
+            embarrassed: '/characters/Niri_Embarrassed.gif',
+            flirty: '/characters/Niri_Flirty.gif'
+        },
+        description: 'Anubian Death Priestess. Meticulous, retiualistic, formal.',
+        isRoster: false,
+        abilities: {
+            str: 10,
+            dex: 14,
+            con: 12,
+            int: 15,
+            wis: 16,
+            cha: 11
+        },
+        baseAbilities: {
+            str: 10,
+            dex: 14,
+            con: 12,
+            int: 15,
+            wis: 16,
+            cha: 11
+        },
+        primaryStat: 'wis',
+        secondaryStat: 'dex',
+        bondLevel: 0,
+        bondProgress: 0,
+        socialUnlocks: [
+            // Fill these in later. Example shape:
+            { bondLevel: 2, description: "Admits shamefully that she had been stealing ((user))'s underwear to keep for its musk." },
+            { bondLevel: 4, description: "Expresses strong desire to carry pups." }
+        ],
+        spellList: [
+            // Fill these in later. Example shape:
+            //{
+            //    id: 'vess_poison_paralysis',
+            //    name: 'Paralysis poison',
+            //    description: 'Applies a paralysis poison that can stop human sized beings from acting for up to 10 minutes.',
+             //   seedCost: 1,
+            //    bondRequirement: 0,
+            //    levelRequirement: 1,
+            //    effectTags: ['poison']
+            //},
+            // {
+            //     id: 'niri_warding_breath',
+            //     name: 'Warding Breath',
+            //     description: 'A whispered prayer that briefly steadies an ally against fear.',
+            //     seedCost: 1,
+            //     bondRequirement: 2,
+            //     levelRequirement: 1,
+            //     effectTags: ['utility', 'social']
+            // }
+        ]
+    },
+    sylviana: {
+        id: 'sylviana',
+        name: 'Sylviana',
+        mood: 'neutral',
+        moodImages: {
+            neutral: '/characters/Niri_Neutral.gif',
+            happy: '/characters/Niri_Happy.gif',
+            exhausted: '/characters/Niri_Exhausted.gif',
+            flustered: '/characters/Niri_Flustered.gif',
+            satisfied: '/characters/Niri_Satisfied.gif',
+            embarrassed: '/characters/Niri_Embarrassed.gif',
+            flirty: '/characters/Niri_Flirty.gif'
+        },
+        description: 'High Elf Eldritch Knight. Graceful acedemic wearing a mischevious latex slime symbiote named Slip as a bodysuit.',
+        isRoster: false,
+        abilities: {
+            str: 11,
+            dex: 15,
+            con: 13,
+            int: 16,
+            wis: 8,
+            cha: 12
+        },
+        baseAbilities: {
+            str: 11,
+            dex: 15,
+            con: 13,
+            int: 16,
+            wis: 8,
+            cha: 12
+        },
+        primaryStat: 'int',
+        secondaryStat: 'dex',
+        bondLevel: 0,
+        bondProgress: 0,
+        socialUnlocks: [
+            // Fill these in later. Example shape:
+            { bondLevel: 2, description: "" },
+            { bondLevel: 4, description: "" }
+        ],
+        spellList: [
+            // Fill these in later. Example shape:
+            //{
+            //    id: 'vess_poison_paralysis',
+            //    name: 'Paralysis poison',
+            //    description: 'Applies a paralysis poison that can stop human sized beings from acting for up to 10 minutes.',
+             //   seedCost: 1,
+            //    bondRequirement: 0,
+            //    levelRequirement: 1,
+            //    effectTags: ['poison']
+            //},
+            // {
+            //     id: 'niri_warding_breath',
+            //     name: 'Warding Breath',
+            //     description: 'A whispered prayer that briefly steadies an ally against fear.',
+            //     seedCost: 1,
+            //     bondRequirement: 2,
+            //     levelRequirement: 1,
+            //     effectTags: ['utility', 'social']
+            // }
+        ]
+    },
+    kessa: {
+        id: 'kessa',
+        name: 'Kessa',
+        mood: 'neutral',
+        moodImages: {
+            neutral: '/characters/Niri_Neutral.gif',
+            happy: '/characters/Niri_Happy.gif',
+            exhausted: '/characters/Niri_Exhausted.gif',
+            flustered: '/characters/Niri_Flustered.gif',
+            satisfied: '/characters/Niri_Satisfied.gif',
+            embarrassed: '/characters/Niri_Embarrassed.gif',
+            flirty: '/characters/Niri_Flirty.gif'
+        },
+        description: 'Lupari beast ranger. Carries herself with predators confidence, always has her dire wolf brother/lover by her side.',
+        isRoster: false,
+        abilities: {
+            str: 13,
+            dex: 16,
+            con: 14,
+            int: 8,
+            wis: 15,
+            cha: 10
+        },
+        baseAbilities: {
+            str: 13,
+            dex: 16,
+            con: 14,
+            int: 8,
+            wis: 15,
+            cha: 10
+        },
+        primaryStat: 'dex',
+        secondaryStat: 'con',
+        bondLevel: 0,
+        bondProgress: 0,
+        socialUnlocks: [
+            // Fill these in later. Example shape:
+            { bondLevel: 2, description: "" },
+            { bondLevel: 4, description: "Kessa tells ((user)) that Fenris likes their scent, and has granted him permission to mark Kessa." }
+        ],
+        spellList: [
+            // Fill these in later. Example shape:
+            //{
+            //    id: 'vess_poison_paralysis',
+            //    name: 'Paralysis poison',
+            //    description: 'Applies a paralysis poison that can stop human sized beings from acting for up to 10 minutes.',
+             //   seedCost: 1,
+            //    bondRequirement: 0,
+            //    levelRequirement: 1,
+            //    effectTags: ['poison']
+            //},
+            // {
+            //     id: 'niri_warding_breath',
+            //     name: 'Warding Breath',
+            //     description: 'A whispered prayer that briefly steadies an ally against fear.',
+            //     seedCost: 1,
+            //     bondRequirement: 2,
+            //     levelRequirement: 1,
+            //     effectTags: ['utility', 'social']
+            // }
+        ]
+    },
 };
 const knownLocations: {[id: string]: Location} = {
     tavern: {
@@ -419,14 +683,17 @@ const mergedCompanions: Companion[] = savedCompanions
             ...fromRoster,
             ...c,
             abilities: c.abilities ?? fromRoster.abilities,
+            // baseAbilities always comes from the roster definition — never from save.
+            // This is the ground truth the scaling math starts from.
+            baseAbilities: fromRoster.baseAbilities ?? fromRoster.abilities,
+            primaryStat: fromRoster.primaryStat,
+            secondaryStat: fromRoster.secondaryStat,
             moodImages: c.moodImages && Object.keys(c.moodImages).length > 0
                 ? c.moodImages
                 : fromRoster.moodImages,
             bondLevel: c.bondLevel ?? 0,
             bondProgress: c.bondProgress ?? 0,
             socialUnlocks: c.socialUnlocks ?? fromRoster.socialUnlocks ?? [],
-            // Always pull spellList from the current roster definition. Spells are
-            // designer data, not save data — we want the live definition.
             spellList: fromRoster.spellList ?? []
         };
     })
@@ -510,6 +777,9 @@ this.myInternalState = {
                     ...fromRoster,
                     ...c,
                     abilities: c.abilities ?? fromRoster.abilities,
+                    baseAbilities: fromRoster.baseAbilities ?? fromRoster.abilities,
+                    primaryStat: fromRoster.primaryStat,
+                    secondaryStat: fromRoster.secondaryStat,
                     moodImages: c.moodImages && Object.keys(c.moodImages).length > 0
                         ? c.moodImages
                         : fromRoster.moodImages,
@@ -712,7 +982,11 @@ formatStatsForPrompt(): string {
     const companionSpellLines = companions
         .filter(c => c.isRoster && c.spellList && c.spellList.length > 0)
         .map(c => {
-            const available = (c.spellList ?? []).filter(s => s.bondRequirement <= (c.bondLevel ?? 0));
+            // Dual-gated: both bond level AND player level must be met.
+            const available = (c.spellList ?? []).filter(
+                s => s.bondRequirement <= (c.bondLevel ?? 0)
+                  && s.levelRequirement <= player.level
+            );
             if (available.length === 0) return `- ${c.name}: (none yet)`;
             const list = available.map(s => `${s.name} (cost: ${s.seedCost})`).join(', ');
             return `- ${c.name}: ${list}`;
@@ -1211,7 +1485,9 @@ offerSpellChoice(companion: Companion): void {
     const learned = new Set(player.tome ?? []);
 
     const eligible = companion.spellList.filter(
-        s => s.bondRequirement <= (companion.bondLevel ?? 0) && !learned.has(s.id)
+        s => s.bondRequirement <= (companion.bondLevel ?? 0)
+          && s.levelRequirement <= player.level
+          && !learned.has(s.id)
     );
     if (eligible.length === 0) {
         console.log(`Stage: ${companion.name} bond up, but no new spells available.`);
@@ -1279,6 +1555,67 @@ computeDerivedStats(level: number, classId: string): {maxHp: number; maxSeeds: n
     };
 }
 
+// Milestone levels at which companion stats bump.
+// Primary stat bumps at all milestones; secondary stat bumps at even milestones only.
+readonly COMPANION_MILESTONES: number[] = [3, 6, 9, 12];
+
+// Compute what a companion's abilities should be at the given player level,
+// starting from their baseAbilities. Returns a new AbilityScores object.
+computeCompanionAbilities(companion: Companion, playerLevel: number): AbilityScores {
+    if (!companion.baseAbilities || !companion.abilities) return companion.abilities ?? {str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10};
+
+    const result: AbilityScores = {...companion.baseAbilities};
+
+    for (const milestone of this.COMPANION_MILESTONES) {
+        if (playerLevel < milestone) break;
+        // Primary stat bumps at every milestone.
+        if (companion.primaryStat) {
+            result[companion.primaryStat] += 1;
+        }
+        // Secondary stat bumps at even milestones only (6, 12).
+        if (companion.secondaryStat && milestone % 6 === 0) {
+            result[companion.secondaryStat] += 1;
+        }
+    }
+
+    return result;
+}
+
+// Apply current player level scaling to all active roster companions.
+// Called after any player level-up.
+scaleCompanionAbilities(): void {
+    const player: PlayerStats = this.myInternalState['player'];
+    const companions: Companion[] = this.myInternalState['activeCompanions'];
+
+    const scaled = companions.map(c => {
+        if (!c.isRoster || !c.primaryStat) return c;
+        return {
+            ...c,
+            abilities: this.computeCompanionAbilities(c, player.level)
+        };
+    });
+
+    this.myInternalState['activeCompanions'] = scaled;
+
+    // Also scale roster companions not currently active,
+    // so they're correct when they join later.
+    const roster: {[id: string]: Companion} = this.myInternalState['companionRoster'];
+    const scaledRoster: {[id: string]: Companion} = {};
+    for (const [id, c] of Object.entries(roster)) {
+        if (!c.isRoster || !c.primaryStat) {
+            scaledRoster[id] = c;
+            continue;
+        }
+        scaledRoster[id] = {
+            ...c,
+            abilities: this.computeCompanionAbilities(c, player.level)
+        };
+    }
+    this.myInternalState['companionRoster'] = scaledRoster;
+
+    console.log(`Stage: companion abilities scaled to player level ${player.level}.`);
+}
+
 // Check XP and apply level-ups if thresholds were crossed.
 // Returns true if at least one level was gained.
 checkLevelUp(): boolean {
@@ -1304,6 +1641,16 @@ checkLevelUp(): boolean {
         this.myInternalState['player'] = player;
         // Flag for the AI's next turn to narrate the moment.
         this.myInternalState['justLeveled'] = true;
+        // Scale companion abilities to the new player level.
+        this.scaleCompanionAbilities();
+        // Offer spell choices from each active companion at the new level.
+        const companions: Companion[] = this.myInternalState['activeCompanions'];
+        for (const companion of companions) {
+            if (companion.isRoster && companion.spellList && companion.spellList.length > 0) {
+                this.offerSpellChoice(companion);
+                if (this.myInternalState['spellChoice']) break;
+            }
+        }
     }
     return leveled;
 }
