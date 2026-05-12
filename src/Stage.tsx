@@ -333,10 +333,9 @@ const companionRoster: {[id: string]: Companion} = {
         socialUnlocks: [
             // Fill these in later. Example shape:
             { bondLevel: 2, description: "Niri nervously asks ((user)) if he could start watching her lay eggs." },
-            { bondLevel: 4, description: "Niri admits she does not know how breeding works." }
+            { bondLevel: 3, description: "Niri admits she does not know how breeding works and asks for help understanding." }
         ],
         spellList: [
-            // Fill these in later. Example shape:
             {
                 id: 'niri_healing_light',
                 name: 'Healing Light',
@@ -346,15 +345,69 @@ const companionRoster: {[id: string]: Companion} = {
                 levelRequirement: 1,
                 effectTags: ['heal']
             },
-            // {
-            //     id: 'niri_warding_breath',
-            //     name: 'Warding Breath',
-            //     description: 'A whispered prayer that briefly steadies an ally against fear.',
-            //     seedCost: 1,
-            //     bondRequirement: 2,
-            //     levelRequirement: 1,
-            //     effectTags: ['utility', 'social']
-            // }
+             {
+                id: 'niri_read_intent',
+                name: 'Read Intent',
+                description: 'Turquoise eyes glow softly, revealing surface emotions of target.',
+                seedCost: 1,
+                bondRequirement: 0,
+                levelRequirement: 1,
+                effectTags: ['divination', 'mental']
+             },
+             {
+                id: 'niri_feather_ward',
+                name: 'Feather Ward',
+                description: 'Shimmering down manifests, deflecting one physical attack.',
+                seedCost: 2,
+                bondRequirement: 0,
+                levelRequirement: 2,
+                effectTags: ['defense', 'ward']
+            },
+            {
+                id: 'niri_wind_lift',
+                name: 'Wind Lift',
+                description: 'Updraft allows brief gliding or softens falls.',
+                seedCost: 2,
+                bondRequirement: 1,
+                levelRequirement: 3,
+                effectTags: ['movement', 'wind']
+            },
+            {
+                id: 'niri_hearts_song',
+                name: "Heart's Song",
+                description: 'Wordless melody that calms hostility and stirs protective feelings.',
+                seedCost: 3,
+                bondRequirement: 2,
+                levelRequirement: 5,
+                effectTags: ['mental', 'charm']
+            },
+            {
+                id: 'niri_divine_insight',
+                name: 'Divine Insight',
+                description: 'Avia-Lessa grants vision of optimal path through current crisis.',
+                seedCost: 5,
+                bondRequirement: 4,
+                levelRequirement: 8,
+                effectTags: ['divination', 'divine']
+            },
+            {
+                id: 'niri_flock_blessing',
+                name: 'Flock Blessing',
+                description: 'Temporary wings sprout on allies, granting flight and aerial combat.',
+                seedCost: 6,
+                bondRequirement: 5,
+                levelRequirement: 10,
+                effectTags: ['transform', 'movement']
+            },
+            {
+                id: 'niri_fertility_prayer',
+                name: 'Fertility Prayer',
+                description: 'Ancient harpy ritual ensuring conception, heightening pleasure beyond mortal limits.',
+                seedCost: 7,
+                bondRequirement: 6,
+                levelRequirement: 12,
+                effectTags: ['divine', 'pleasure', 'conception']
+            }
         ]
     },
     vess: {
@@ -607,11 +660,11 @@ const companionRoster: {[id: string]: Companion} = {
     },
 };
 const knownLocations: {[id: string]: Location} = {
-    tavern: {
-        id: 'tavern',
-        name: 'The Drunken Griffon',
+    crypt: {
+        id: 'crypt',
+        name: 'Last human crypt',
         image: '/Locations/loc_tavern.png',
-        description: 'A warm, smoky tavern in the heart of town.',
+        description: 'A ruined crypt where Niri awoke Cody from his slumber',
         isKnown: true
     },
     forest: {
@@ -621,11 +674,46 @@ const knownLocations: {[id: string]: Location} = {
         description: 'An ancient forest where the trees seem to murmur.',
         isKnown: true
     },
-    road: {
-        id: 'road',
-        name: 'The King\'s Road',
-        image: '/Locations/loc_road.png',
-        description: 'A wide, well-traveled trade road.',
+    aetheris_pass: {
+        id: 'aetheris_pass',
+        name: 'The Collapsed Pass',
+        image: '/Locations/loc_aetheris_pass.png',
+        description: 'An overgrown rockfall that hides the only entrance to the valley of Aetheris. A narrow gap, only visible on close inspection.',
+        isKnown: true
+    },
+    aetheris_valley: {
+        id: 'aetheris_valley',
+        name: 'Valley of Aetheris',
+        image: '/Locations/loc_aetheris_valley.png',
+        description: 'A hidden valley of breathtaking beauty. What remains of a once great city is almost entirely absorbed by nature — foundations beneath grass, walls reduced to stumps. The cliff-built castle is the only thing still recognizably built.',
+        isKnown: true
+    },
+    aetheris_ruins: {
+        id: 'aetheris_ruins',
+        name: 'The City Ruins',
+        image: '/Locations/loc_aetheris_ruins.png',
+        description: 'The floor of the valley where Aetheris once stood. Rubble and shaped stone, worn smooth by time, absorbed by grass and tree roots. The scale is readable; nothing else is.',
+        isKnown: true
+    },
+    aetheris_approach: {
+        id: 'aetheris_approach',
+        name: 'The Castle Approach',
+        image: '/Locations/loc_aetheris_approach.png',
+        description: 'The broken road and stairs climbing to the castle ruins. Navigable but demanding. Sound drops away as you climb.',
+        isKnown: true
+    },
+    aetheris_throne: {
+        id: 'aetheris_throne',
+        name: 'The Throne Room',
+        image: '/Locations/loc_aetheris_throne.png',
+        description: 'Mostly open to sky. The walls that extended beyond the cliff face are nearly gone. The throne itself was removed deliberately — only the dais markings remain. The mountain face at the back is intact. The room feels emptied, not abandoned.',
+        isKnown: true
+    },
+    aetheris_shrine: {
+        id: 'aetheris_shrine',
+        name: 'The Shrine Room',
+        image: '/Locations/loc_aetheris_shrine.png',
+        description: 'A hidden shrine room beneath the throne room, accessed by a passage revealed by centuries of settling. A shaft of intentional light illuminates a central pool surrounded by fallen statues — all collapsed beyond recognition except one: a harpy, standing, serene, with an empty gemstone setting in her vessel.',
         isKnown: true
     }
 };
@@ -1088,6 +1176,7 @@ Companion rules:
 - To change a roster companion's mood, use companion.<id>.mood=<mood>.
 - Valid moods for Niri: ${validMoods.join(', ')}
 - To add a companion: companion+=<Name>. To remove: companion-=<id or name>.
+- If current day is divisible by 7, companions are ovulating and get a +5 to impregnation rolls (DC 15 vs con)
 
 Bond rules:
 - Bond is per-companion, 0-10. It only goes up, never down.
@@ -1095,8 +1184,8 @@ Bond rules:
 - Valid events and their amounts:
   * personal_moment (+1): sharing a meal, quiet conversation, asking about their past
   * quest_assist (+1): companion was meaningfully helpful toward a player goal
-  * defending (+2): player took a hit for them, stood up for them, prioritized their safety
-  * personal_sacrifice (+2): player gave them something valuable, shared a reward in their favor
+  * intimacy (+2): player had sexual encounter that led one or both to reach orgasm
+  * impregnated (+2): player successfully impregnated companion and they now carry fertile eggs
 - Award bond sparingly. One bond event per response, at most. Only emit when a meaningful moment actually occurred — not for every kind word.
 - Do NOT award bond for casual greetings, mundane interactions, or doing things companions would do anyway.
 - Award the lower amount when in doubt; the system rewards consistent care over time.
@@ -1115,7 +1204,7 @@ Spell casting rules:
 - The TOME shows which spells the player has learned through bond growth. The tome is descriptive: it tracks the player's relationship-built knowledge. A companion can still cast their own unlocked spells regardless of tome, but the tome reflects the magical bond between player and companion.
 - When a companion casts: narrate the moment in-character (the gesture, the visual, the cost), then deduct seeds via [STATE: seeds-=N] where N matches the spell's seed cost.
 - If the player asks a companion to cast something not in COMPANION SPELL ACCESS, narrate the companion struggling, declining, or admitting they don't know it. Don't pretend they can.
-- If the player asks for a spell when seeds=0, the companion cannot comply. Narrate the strain, the empty satchel, the moment of helplessness — turn it into character.
+- If the player asks for a spell when seeds=0, the companion cannot comply. Narrate the strain, the moment of helplessness — turn it into character.
 - Don't have companions cast unprompted in trivial moments. Save magic for stakes.
 
 Long rest rules:
