@@ -173,6 +173,11 @@ type SpellChoice = {
     candidates: Spell[];        // 3 random spells offered (or fewer if pool too small)
 };
 
+type CompanionPregnancy = {
+    startDay: number;   // day the task started
+    endDay: number;     // day the task completes (startDay + 14)
+};
+
 type Companion = {
     id: string;
     name: string;
@@ -188,6 +193,9 @@ type Companion = {
     bondProgress?: number;           // points accumulated toward next level
     socialUnlocks?: SocialUnlock[];  // narrative beats keyed to bond level
     spellList?: Spell[];             // spells this companion knows
+    eggCount?: number;          // mushrooms currently carried by this companion
+    activePregnancy?: CompanionPregnancy | null; // current gathering task, null if none
+    taskDeclineText?: string;        // what the companion says when they decline a task
 };
 
 // Cumulative cost to reach each bond level. Index 0 = cost to reach level 1.
@@ -221,6 +229,11 @@ type MessageStateType = {
     rollState: RollState;
     spellChoice?: SpellChoice | null;
     timeState?: TimeState;
+    worldState?: WorldState;
+};
+
+type WorldState = {
+    aetherPopulation: number;   // current population of Aetheris, starts at 0
 };
 
 /***
@@ -330,6 +343,9 @@ const companionRoster: {[id: string]: Companion} = {
         secondaryStat: 'int',
         bondLevel: 0,
         bondProgress: 0,
+        eggCount: 0,
+        activePregnancy: null,
+        taskDeclineText: 'Niri, catching her breath, places a hand on her abdomen. She does not think the pregnancy took hold, but she is happy to try as many times as it takes.',
         socialUnlocks: [
             // Fill these in later. Example shape:
             { bondLevel: 2, description: "Niri nervously asks ((user)) if he could start watching her lay eggs." },
@@ -445,6 +461,9 @@ const companionRoster: {[id: string]: Companion} = {
         secondaryStat: 'str',
         bondLevel: 0,
         bondProgress: 0,
+        eggCount: 0,
+        activePregnancy: null,
+        taskDeclineText: 'Vess has a look of amazed disbelief about what just occured. She does not think the pregnancy took hold, but says should would like to try again if it is OK.',
         socialUnlocks: [
             // Fill these in later. Example shape:
             { bondLevel: 2, description: "Vess begins making efforts to fix her hair in a way that doesn't cover her face." },
@@ -507,6 +526,9 @@ const companionRoster: {[id: string]: Companion} = {
         secondaryStat: 'dex',
         bondLevel: 0,
         bondProgress: 0,
+        eggCount: 0,
+        activePregnancy: null,
+        taskDeclineText: 'Anket has a look of immense disappointment as she feels her abdomen, feeling the pregnancy not take hold. Then a fire lights in her expression with determination to try again.',
         socialUnlocks: [
             // Fill these in later. Example shape:
             { bondLevel: 2, description: "Admits shamefully that she had been stealing ((user))'s underwear to keep for its musk." },
@@ -631,6 +653,9 @@ const companionRoster: {[id: string]: Companion} = {
         secondaryStat: 'con',
         bondLevel: 0,
         bondProgress: 0,
+        eggCount: 0,
+        activePregnancy: null,
+        taskDeclineText: 'Kessa catches her breath, and comments about no pups this time.',
         socialUnlocks: [
             // Fill these in later. Example shape:
             { bondLevel: 2, description: "" },
@@ -771,8 +796,6 @@ const mergedCompanions: Companion[] = savedCompanions
             ...fromRoster,
             ...c,
             abilities: c.abilities ?? fromRoster.abilities,
-            // baseAbilities always comes from the roster definition — never from save.
-            // This is the ground truth the scaling math starts from.
             baseAbilities: fromRoster.baseAbilities ?? fromRoster.abilities,
             primaryStat: fromRoster.primaryStat,
             secondaryStat: fromRoster.secondaryStat,
@@ -781,6 +804,9 @@ const mergedCompanions: Companion[] = savedCompanions
                 : fromRoster.moodImages,
             bondLevel: c.bondLevel ?? 0,
             bondProgress: c.bondProgress ?? 0,
+            mushroomCount: c.eggCount ?? 0,
+            activeTask: c.activePregnancy ?? null,
+            taskDeclineText: fromRoster.taskDeclineText,
             socialUnlocks: c.socialUnlocks ?? fromRoster.socialUnlocks ?? [],
             spellList: fromRoster.spellList ?? []
         };
@@ -873,6 +899,9 @@ this.myInternalState = {
                         : fromRoster.moodImages,
                     bondLevel: c.bondLevel ?? 0,
                     bondProgress: c.bondProgress ?? 0,
+                    mushroomCount: c.eggCount ?? 0,
+                    activeTask: c.activePregnancy ?? null,
+                    taskDeclineText: fromRoster.taskDeclineText,
                     socialUnlocks: c.socialUnlocks ?? fromRoster.socialUnlocks ?? [],
                     spellList: fromRoster.spellList ?? []
                 };
@@ -890,7 +919,10 @@ this.myInternalState = {
             spellChoice: state.spellChoice ?? null,
             timeState: (state.timeState && typeof state.timeState === 'object' && 'period' in state.timeState)
                 ? state.timeState
-                : this.myInternalState['timeState'] ?? {day: 0, period: 'morning'}
+                : this.myInternalState['timeState'] ?? {day: 0, period: 'morning'},
+            worldState: (state.worldState && typeof state.worldState === 'object' && 'aetherPopulation' in state.worldState)
+                ? state.worldState
+                : this.myInternalState['worldState'] ?? {aetherPopulation: 0}
         };
 
         this.bumpVersion();
@@ -1148,6 +1180,27 @@ Day ${(this.myInternalState['timeState'] as TimeState).day}, ${(this.myInternalS
 [KNOWN LOCATIONS]
 ${knownLocationLines}
 [/KNOWN LOCATIONS]
+
+[AETHERIS POPULATION]
+Current population: ${(this.myInternalState['worldState'] as WorldState).aetherPopulation}
+Eggs hatch into new settlers: 1 egg = 1 population, hatch every 30 days automatically.
+[/AETHERIS POPULATION]
+
+${(() => {
+    const hints: string[] = this.myInternalState['completedTaskHints'] ?? [];
+    if (hints.length === 0) return '';
+    const lines = hints.map(h => {
+        const [name, gained] = h.split(':');
+        return `** ${name} needs to lay ${gained} eggs from. Narrate an intimate scene with sexual undertones. **`;
+    }).join('\n');
+    return `[PREGNANCY COMPLETION]\n${lines}\n[/PREGNANCY COMPLETION]\n`;
+})()}
+${(() => {
+    if (!this.myInternalState['hatchingDayOccurred']) return '';
+    const amount = this.myInternalState['hatchingDayAmount'] ?? 0;
+    const pop = (this.myInternalState['worldState'] as WorldState).aetherPopulation;
+    return `[HATCHING DAY]\n** Day ${(this.myInternalState['timeState'] as TimeState).day} is a hatching day. ${amount} eggs were hatched into Aetheris. Population is now ${pop}. Narrate a brief moment acknowledging the eggs hatching as adults, ready to learn about the world and rebuild Aetheris. **\n[/HATCHING DAY]\n`;
+})()}
 
 [ROLL]
 ${this.formatRollBlock()}
@@ -1774,6 +1827,112 @@ setClass(classId: string): void {
     console.log(`Stage: class set to ${classId}.`);
 }
 
+// Derive task status from current day and task dates.
+// Returns null if no active task.
+getTaskStatus(companion: Companion): 'early_pregnancy' | 'mid_pregnancy' | 'late_pregnancy' | null {
+    if (!companion.activePregnancy) return null;
+    const ts: TimeState = this.myInternalState['timeState'];
+    const elapsed = ts.day - companion.activePregnancy.startDay;
+    if (elapsed < 3) return 'early_pregnancy';
+    if (elapsed < 12) return 'mid_pregnancy';
+    return 'late_pregnancy';
+}
+
+// Attempt to assign a mushroom gathering task to a companion.
+// Rolls companion CHA vs DC 15. Returns true if task started, false if declined.
+assignGatheringTask(companionId: string): {success: boolean; message: string} {
+    const companions: Companion[] = this.myInternalState['activeCompanions'];
+    const companion = companions.find(c => c.id === companionId);
+
+    if (!companion || !companion.isRoster) {
+        return {success: false, message: 'Companion not found.'};
+    }
+    if (companion.activePregnancy) {
+        return {success: false, message: `${companion.name} already pregnant.`};
+    }
+
+    // Roll companion CHA vs DC 15.
+    const cha = companion.abilities?.cha ?? 10;
+    const modifier = Math.floor((cha - 10) / 2);
+    const raw = Math.floor(Math.random() * 20) + 1;
+    const total = raw + modifier;
+
+    console.log(`Stage: ${companion.name} CHA check — rolled ${raw} + ${modifier} = ${total} vs DC 15.`);
+
+    if (total < 15) {
+        // Task declined.
+        const declineText = companion.taskDeclineText ?? `${companion.name} shakes their head — not the right time.`;
+        return {success: false, message: declineText};
+    }
+
+    // Task accepted — assign it.
+    const ts: TimeState = this.myInternalState['timeState'];
+    companion.activePregnancy = {
+        startDay: ts.day,
+        endDay: ts.day + 14
+    };
+    this.myInternalState['activeCompanions'] = [...companions];
+    console.log(`Stage: ${companion.name} successfully impregnated. Due day ${companion.activePregnancy.endDay}.`);
+    return {success: true, message: `${companion.name} agrees to gather mushrooms. They will have results in 14 days.`};
+}
+
+// Check all active companions for completed tasks.
+// Called every turn in beforePrompt.
+// Returns array of companion names whose tasks just completed.
+checkTaskCompletions(): string[] {
+    const companions: Companion[] = this.myInternalState['activeCompanions'];
+    const ts: TimeState = this.myInternalState['timeState'];
+    const completed: string[] = [];
+
+    const updated = companions.map(c => {
+        if (!c.activePregnancy || ts.day < c.activePregnancy.endDay) return c;
+        // Task complete — award 3-6 mushrooms.
+        const gained = Math.floor(Math.random() * 4) + 3; // 3-6 inclusive
+        const newCount = (c.eggCount ?? 0) + gained;
+        console.log(`Stage: ${c.name} completed mushroom task. Gained ${gained}, now carrying ${newCount}.`);
+        completed.push(`${c.name}:${gained}`);
+        return {
+            ...c,
+            mushroomCount: newCount,
+            activeTask: null
+        };
+    });
+
+    if (completed.length > 0) {
+        this.myInternalState['activeCompanions'] = updated;
+    }
+
+    return completed;
+}
+
+// Check if current day is a multiple of 30.
+// If so, consume all mushrooms from all companions and update population.
+checkEggConsumption(): void {
+    const ts: TimeState = this.myInternalState['timeState'];
+    if (ts.day === 0 || ts.day % 30 !== 0) return;
+
+    const companions: Companion[] = this.myInternalState['activeCompanions'];
+    let total = 0;
+
+    const updated = companions.map(c => {
+        const count = c.eggCount ?? 0;
+        total += count;
+        return {...c, eggCount: 0};
+    });
+
+    if (total === 0) return;
+
+    const worldState: WorldState = this.myInternalState['worldState'];
+    const newPop = worldState.aetherPopulation + total;
+    this.myInternalState['worldState'] = {...worldState, aetherPopulation: newPop};
+    this.myInternalState['activeCompanions'] = updated;
+
+    // Flag for AI narration.
+    this.myInternalState['hatchingDayOccurred'] = true;
+    this.myInternalState['hatchingDayAmount'] = total;
+    console.log(`Stage: day ${ts.day} hatching. Consumed ${total} eggs. Population now ${newPop}.`);
+}
+
 longRest(): void {
     const player: PlayerStats = {...this.myInternalState['player']};
     const beforeSeeds = player.seeds;
@@ -1880,6 +2039,27 @@ setTimePeriod(targetPeriod: TimePeriod): void {
             }
         }
 
+        // Check for completed gathering tasks and flag the AI to narrate them.
+        const completedPregnancies = this.checkTaskCompletions();
+        if (completedPregnancies.length > 0) {
+            this.myInternalState['completedTaskHints'] = completedPregnancies;
+        } else if (this.myInternalState['completedPregnancyHints']) {
+            // Clear after the AI has seen it.
+            delete this.myInternalState['completedPregnancyHints'];
+        }
+
+        // Check for mushroom consumption on multiples of day 30.
+        this.checkEggConsumption();
+
+        // Clear feeding day hint after the AI has seen it.
+        if (this.myInternalState['hatchingDayShown']) {
+            delete this.myInternalState['hatchingDayOccurred'];
+            delete this.myInternalState['hatchingDayAmount'];
+            delete this.myInternalState['hatchingDayShown'];
+        } else if (this.myInternalState['hatchingDayOccurred']) {
+            this.myInternalState['hatchingDayShown'] = true;
+        }
+
         // Clear resolved rolls only after the AI has had a chance to see them.
         // We use a "seen" flag stored alongside rollState to track this.
         const rs: RollState = this.myInternalState['rollState'];
@@ -1909,7 +2089,9 @@ setTimePeriod(targetPeriod: TimePeriod): void {
                 activeCompanions: this.myInternalState['activeCompanions'],
                 currentLocation: this.myInternalState['currentLocation'],
                 rollState: this.myInternalState['rollState'],
-                spellChoice: this.myInternalState['spellChoice']
+                spellChoice: this.myInternalState['spellChoice'],
+                timeState: this.myInternalState['timeState'],
+                worldState: this.myInternalState['worldState']
             },
             /*** @type null | string @description If not null, the user's message itself is replaced
              with this value, both in what's sent to the LLM and in the database. ***/
@@ -1957,7 +2139,9 @@ setTimePeriod(targetPeriod: TimePeriod): void {
                 activeCompanions: this.myInternalState['activeCompanions'],
                 currentLocation: this.myInternalState['currentLocation'],
                 rollState: this.myInternalState['rollState'],
-                spellChoice: this.myInternalState['spellChoice']
+                spellChoice: this.myInternalState['spellChoice'],
+                timeState: this.myInternalState['timeState'],
+                worldState: this.myInternalState['worldState']
             },
             /*** @type null | string @description If not null, the bot's response itself is replaced
              with this value, both in what's sent to the LLM subsequently and in the database. ***/
@@ -2361,6 +2545,65 @@ renderInner(): ReactElement {
                 </div>
             );
         })()}
+        {(() => {
+            const msg: string | undefined = this.myInternalState['taskMessage'];
+            if (!msg) return null;
+            return (
+                <div style={{
+                    marginTop: '8px',
+                    padding: '8px',
+                    background: 'rgba(60, 40, 20, 0.4)',
+                    border: '1px solid #6a4a2a',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    color: '#bbb',
+                    fontStyle: 'italic'
+                }}>
+                    {msg}
+                    <button
+                        style={{
+                            display: 'block',
+                            marginTop: '4px',
+                            fontSize: '10px',
+                            padding: '2px 6px',
+                            cursor: 'pointer',
+                            background: 'transparent',
+                            color: '#888',
+                            border: '1px solid #444',
+                            borderRadius: '3px'
+                        }}
+                        onClick={() => {
+                            delete this.myInternalState['taskMessage'];
+                            this.bumpVersion();
+                        }}
+                    >
+                        Dismiss
+                    </button>
+                </div>
+            );
+        })()}
+
+        {(() => {
+            const loc: Location = this.myInternalState['currentLocation'];
+            const aetherIds = ['aetheris_pass', 'aetheris_valley', 'aetheris_ruins', 'aetheris_approach', 'aetheris_throne', 'aetheris_shrine'];
+            if (!aetherIds.includes(loc.id)) return null;
+            const worldState: WorldState = this.myInternalState['worldState'];
+            return (
+                <div style={{
+                    marginTop: '8px',
+                    padding: '8px',
+                    background: 'rgba(40, 40, 60, 0.4)',
+                    border: '1px solid #6a6aaa',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    color: '#bbb'
+                }}>
+                    <span style={{color: '#aac46b', fontWeight: 'bold'}}>Aetheris Population: </span>
+                    <span style={{color: '#e0e0e0'}}>{worldState.aetherPopulation}</span>
+                </div>
+            );
+        })()}
+
         <div style={{
     marginTop: '12px',
     borderTop: '1px solid #444',
@@ -2410,6 +2653,17 @@ renderInner(): ReactElement {
                         const prog = c.bondProgress ?? 0;
                         const cost = BOND_LEVEL_COSTS[lvl];
                         const pct = cost ? Math.min(100, (prog / cost) * 100) : 100;
+                        const taskStatus = this.getTaskStatus(c);
+                        const statusColors: {[k: string]: string} = {
+                            just_started: '#aac46b',
+                            in_progress: '#ffd56b',
+                            almost_complete: '#ff9f43'
+                        };
+                        const statusLabels: {[k: string]: string} = {
+                            just_started: 'Just Started',
+                            in_progress: 'In Progress',
+                            almost_complete: 'Almost Complete'
+                        };
                         return (
                             <div style={{marginTop: '4px', textAlign: 'left'}}>
                                 <div style={{fontSize: '10px', color: '#888', marginBottom: '2px'}}>
@@ -2429,6 +2683,44 @@ renderInner(): ReactElement {
                                         transition: 'width 0.3s'
                                     }}/>
                                 </div>
+                                {(c.eggCount ?? 0) > 0 && (
+                                    <div style={{fontSize: '10px', color: '#aac46b', marginTop: '3px'}}>
+                                        🍄 {c.eggCount} mushroom{(c.eggCount ?? 0) === 1 ? '' : 's'}
+                                    </div>
+                                )}
+                                {taskStatus ? (
+                                    <div style={{
+                                        fontSize: '10px',
+                                        color: statusColors[taskStatus],
+                                        marginTop: '3px',
+                                        fontStyle: 'italic'
+                                    }}>
+                                        Gathering — {statusLabels[taskStatus]}
+                                    </div>
+                                ) : (
+                                    <button
+                                        style={{
+                                            marginTop: '4px',
+                                            fontSize: '10px',
+                                            padding: '2px 6px',
+                                            cursor: 'pointer',
+                                            background: '#2a3a2a',
+                                            color: '#aac46b',
+                                            border: '1px solid #4a5a4a',
+                                            borderRadius: '3px',
+                                            width: '100%'
+                                        }}
+                                        onClick={() => {
+                                            const result = this.assignGatheringTask(c.id);
+                                            if (!result.success) {
+                                                this.myInternalState['taskMessage'] = result.message;
+                                            }
+                                            this.bumpVersion();
+                                        }}
+                                    >
+                                        Active Pregnancy
+                                    </button>
+                                )}
                             </div>
                         );
                     })()}
