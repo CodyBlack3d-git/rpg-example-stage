@@ -88,28 +88,7 @@ const CHARACTER_CLASSES: {[id: string]: CharacterClass} = {
         traitTarget: 'maxHp',
         traitPerLevels: 3
     },
-    trickster: {
-        id: 'trickster',
-        name: 'Trickster',
-        description: 'A rogue, performer, or charmer — quick of hand and tongue, often misjudging when to stop.',
-        strengths: ['dex', 'cha'],
-        weaknesses: ['wis'],
-        traitName: 'Quick Tongue',
-        traitDescription: 'Bonus to persuasion, deception, and performance rolls.',
-        traitTarget: 'social',
-        traitPerLevels: 3
-    },
-    warden: {
-        id: 'warden',
-        name: 'Warden',
-        description: 'A defender — disciplined, dependable, slow to act but unstoppable when committed.',
-        strengths: ['con', 'wis'],
-        weaknesses: ['dex'],
-        traitName: 'Iron Stand',
-        traitDescription: 'Bonus to combat rolls when defending or holding ground.',
-        traitTarget: 'combat',
-        traitPerLevels: 3
-    }
+
 };
 
 // Cumulative XP cost for each level, starting at level 2.
@@ -173,6 +152,11 @@ type SpellChoice = {
     candidates: Spell[];        // 3 random spells offered (or fewer if pool too small)
 };
 
+type CompanionPregnancy = {
+    startDay: number;   // day the task started
+    endDay: number;     // day the task completes (startDay + 14)
+};
+
 type Companion = {
     id: string;
     name: string;
@@ -188,6 +172,9 @@ type Companion = {
     bondProgress?: number;           // points accumulated toward next level
     socialUnlocks?: SocialUnlock[];  // narrative beats keyed to bond level
     spellList?: Spell[];             // spells this companion knows
+    eggCount?: number;          // mushrooms currently carried by this companion
+    activePregnancy?: CompanionPregnancy | null; // current gathering task, null if none
+    pregnancyFailedText?: string;        // what the companion says when they decline a task
 };
 
 // Cumulative cost to reach each bond level. Index 0 = cost to reach level 1.
@@ -221,6 +208,11 @@ type MessageStateType = {
     rollState: RollState;
     spellChoice?: SpellChoice | null;
     timeState?: TimeState;
+    worldState?: WorldState;
+};
+
+type WorldState = {
+    aetherPopulation: number;   // current population of Aetheris, starts at 0
 };
 
 /***
@@ -330,6 +322,9 @@ const companionRoster: {[id: string]: Companion} = {
         secondaryStat: 'int',
         bondLevel: 0,
         bondProgress: 0,
+        eggCount: 0,
+        activePregnancy: null,
+        pregnancyFailedText: 'Niri puts her hand on her abdomen, and mentioning something about not thinking the pregnancy took, but is happy to try as many times as it takes.',
         socialUnlocks: [
             // Fill these in later. Example shape:
             { bondLevel: 2, description: "Niri nervously asks ((user)) if he could start watching her lay eggs." },
@@ -445,6 +440,9 @@ const companionRoster: {[id: string]: Companion} = {
         secondaryStat: 'str',
         bondLevel: 0,
         bondProgress: 0,
+        eggCount: 0,
+        activePregnancy: null,
+        pregnancyFailedText: 'Vess has an expression of overwhelming emotion. She does not think the pregnancy took, but is OK with trying again if Cody wants.',
         socialUnlocks: [
             // Fill these in later. Example shape:
             { bondLevel: 2, description: "Vess begins making efforts to fix her hair in a way that doesn't cover her face." },
@@ -507,6 +505,9 @@ const companionRoster: {[id: string]: Companion} = {
         secondaryStat: 'dex',
         bondLevel: 0,
         bondProgress: 0,
+        eggCount: 0,
+        activePregnancy: null,
+        pregnancyFailedText: 'After recovering, Anket has an expression of deep disappointment as she feels the pregnancy did not take hold. Then a fire of determination lights in her eyes, she will go as many times as it takes.',
         socialUnlocks: [
             // Fill these in later. Example shape:
             { bondLevel: 2, description: "Admits shamefully that she had been stealing ((user))'s underwear to keep for its musk." },
@@ -571,8 +572,8 @@ const companionRoster: {[id: string]: Companion} = {
         bondProgress: 0,
         socialUnlocks: [
             // Fill these in later. Example shape:
-            { bondLevel: 2, description: "" },
-            { bondLevel: 4, description: "" }
+            { bondLevel: 2, description: "When in a quiet moment, Sylviana mentions to Cody that Slip has been warming up to him." },
+            { bondLevel: 4, description: "When in a safe area, Sylviana says to Cody that Slip wants to show him a new trick. To Sylvianas alarm, she Slip transforms into a humiliating latex cat outfit." }
         ],
         spellList: [
             // Fill these in later. Example shape:
@@ -631,6 +632,9 @@ const companionRoster: {[id: string]: Companion} = {
         secondaryStat: 'con',
         bondLevel: 0,
         bondProgress: 0,
+        eggCount: 0,
+        activePregnancy: null,
+        pregnancyFailedText: 'Kessa, after recovering, touches her abdomen, and says no pups yet. More to Fenris than to Cody.',
         socialUnlocks: [
             // Fill these in later. Example shape:
             { bondLevel: 2, description: "" },
@@ -771,8 +775,6 @@ const mergedCompanions: Companion[] = savedCompanions
             ...fromRoster,
             ...c,
             abilities: c.abilities ?? fromRoster.abilities,
-            // baseAbilities always comes from the roster definition — never from save.
-            // This is the ground truth the scaling math starts from.
             baseAbilities: fromRoster.baseAbilities ?? fromRoster.abilities,
             primaryStat: fromRoster.primaryStat,
             secondaryStat: fromRoster.secondaryStat,
@@ -781,6 +783,9 @@ const mergedCompanions: Companion[] = savedCompanions
                 : fromRoster.moodImages,
             bondLevel: c.bondLevel ?? 0,
             bondProgress: c.bondProgress ?? 0,
+            mushroomCount: c.eggCount ?? 0,
+            activeTask: c.activePregnancy ?? null,
+            taskDeclineText: fromRoster.pregnancyFailedText,
             socialUnlocks: c.socialUnlocks ?? fromRoster.socialUnlocks ?? [],
             spellList: fromRoster.spellList ?? []
         };
@@ -791,7 +796,7 @@ this.myInternalState = {
     player: mergedPlayer,
     activeCompanions: mergedCompanions,
     companionRoster: companionRoster,
-    currentLocation: messageState?.currentLocation ?? knownLocations.tavern,
+    currentLocation: messageState?.currentLocation ?? knownLocations.crypt,
     knownLocations: knownLocations,
     rollState: (messageState?.rollState && typeof messageState.rollState === 'object' && 'kind' in messageState.rollState)
         ? messageState.rollState
@@ -800,6 +805,9 @@ this.myInternalState = {
     timeState: (messageState?.timeState && typeof messageState.timeState === 'object' && 'period' in messageState.timeState)
         ? messageState.timeState
         : {day: 0, period: 'morning'},
+    worldState: (messageState?.worldState && typeof messageState.worldState === 'object' && 'aetherPopulation' in messageState.worldState)
+        ? messageState.worldState
+        : {aetherPopulation: 0},
     numUsers: Object.keys(users).length,
     numChars: Object.keys(characters).length
 };
@@ -873,6 +881,9 @@ this.myInternalState = {
                         : fromRoster.moodImages,
                     bondLevel: c.bondLevel ?? 0,
                     bondProgress: c.bondProgress ?? 0,
+                    mushroomCount: c.eggCount ?? 0,
+                    activeTask: c.activePregnancy ?? null,
+                    taskDeclineText: fromRoster.pregnancyFailedText,
                     socialUnlocks: c.socialUnlocks ?? fromRoster.socialUnlocks ?? [],
                     spellList: fromRoster.spellList ?? []
                 };
@@ -890,7 +901,10 @@ this.myInternalState = {
             spellChoice: state.spellChoice ?? null,
             timeState: (state.timeState && typeof state.timeState === 'object' && 'period' in state.timeState)
                 ? state.timeState
-                : this.myInternalState['timeState'] ?? {day: 0, period: 'morning'}
+                : this.myInternalState['timeState'] ?? {day: 0, period: 'morning'},
+            worldState: (state.worldState && typeof state.worldState === 'object' && 'aetherPopulation' in state.worldState)
+                ? state.worldState
+                : this.myInternalState['worldState'] ?? {aetherPopulation: 0}
         };
 
         this.bumpVersion();
@@ -1149,6 +1163,27 @@ Day ${(this.myInternalState['timeState'] as TimeState).day}, ${(this.myInternalS
 ${knownLocationLines}
 [/KNOWN LOCATIONS]
 
+[AETHERIS POPULATION]
+Current population: ${(this.myInternalState['worldState'] as WorldState).aetherPopulation}
+Eggs hatch new settlers: 1 egg = 1 population, hatched every 30 days automatically.
+[/AETHERIS POPULATION]
+
+${(() => {
+    const hints: string[] = this.myInternalState['completedTaskHints'] ?? [];
+    if (hints.length === 0) return '';
+    const lines = hints.map(h => {
+        const [name, gained] = h.split(':');
+        return `** ${name} is about to lay ${gained} eggs. Narrate a brief moment where the party finds a safe location for the eggs to be laid, with a scene that has sexual undertones. **`;
+    }).join('\n');
+    return `[TASK COMPLETION]\n${lines}\n[/TASK COMPLETION]\n`;
+})()}
+${(() => {
+    if (!this.myInternalState['hatchingDayOccurred']) return '';
+    const amount = this.myInternalState['hatchingDayAmount'] ?? 0;
+    const pop = (this.myInternalState['worldState'] as WorldState).aetherPopulation;
+    return `[HATCHIING DAY]\n** Day ${(this.myInternalState['timeState'] as TimeState).day} is a hatching day. ${amount} eggs were hatched. Population is now ${pop}. Narrate a brief moment acknowledging the settlement's growth, with the eggs hatching adults, though with bodies still growing, and still needing to learn of the world. **\n[/HATCHING DAY]\n`;
+})()}
+
 [ROLL]
 ${this.formatRollBlock()}
 [/ROLL]
@@ -1176,7 +1211,6 @@ Companion rules:
 - To change a roster companion's mood, use companion.<id>.mood=<mood>.
 - Valid moods for Niri: ${validMoods.join(', ')}
 - To add a companion: companion+=<Name>. To remove: companion-=<id or name>.
-- If current day is divisible by 7, companions are ovulating and get a +5 to impregnation rolls (DC 15 vs con)
 
 Bond rules:
 - Bond is per-companion, 0-10. It only goes up, never down.
@@ -1774,6 +1808,112 @@ setClass(classId: string): void {
     console.log(`Stage: class set to ${classId}.`);
 }
 
+// Derive task status from current day and task dates.
+// Returns null if no active task.
+getPregnancyStatus(companion: Companion): 'early_pregnancy' | 'mid_pregnancy' | 'late_pregnancy' | null {
+    if (!companion.activePregnancy) return null;
+    const ts: TimeState = this.myInternalState['timeState'];
+    const elapsed = ts.day - companion.activePregnancy.startDay;
+    if (elapsed < 3) return 'early_pregnancy';
+    if (elapsed < 12) return 'mid_pregnancy';
+    return 'late_pregnancy';
+}
+
+// Attempt to assign a mushroom gathering task to a companion.
+// Rolls companion CHA vs DC 15. Returns true if task started, false if declined.
+assignGatheringTask(companionId: string): {success: boolean; message: string} {
+    const companions: Companion[] = this.myInternalState['activeCompanions'];
+    const companion = companions.find(c => c.id === companionId);
+
+    if (!companion || !companion.isRoster) {
+        return {success: false, message: 'Companion not found.'};
+    }
+    if (companion.activePregnancy) {
+        return {success: false, message: `${companion.name} is already pregnant.`};
+    }
+
+    // Roll companion CHA vs DC 15.
+    const cha = companion.abilities?.cha ?? 10;
+    const modifier = Math.floor((cha - 10) / 2);
+    const raw = Math.floor(Math.random() * 20) + 1;
+    const total = raw + modifier;
+
+    console.log(`Stage: ${companion.name} CON check — rolled ${raw} + ${modifier} = ${total} vs DC 15.`);
+
+    if (total < 15) {
+        // Task declined.
+        const declineText = companion.pregnancyFailedText ?? `${companion.name} doesnt think the pregnancy took hold.`;
+        return {success: false, message: declineText};
+    }
+
+    // Task accepted — assign it.
+    const ts: TimeState = this.myInternalState['timeState'];
+    companion.activePregnancy = {
+        startDay: ts.day,
+        endDay: ts.day + 14
+    };
+    this.myInternalState['activeCompanions'] = [...companions];
+    console.log(`Stage: ${companion.name} is successfully impregnated. Due day ${companion.activePregnancy.endDay}.`);
+    return {success: true, message: `${companion.name} believes the pregnancy took hold. Look forward to their belly swelling over the next 14 days.`};
+}
+
+// Check all active companions for completed tasks.
+// Called every turn in beforePrompt.
+// Returns array of companion names whose tasks just completed.
+checkPregnancyCompletions(): string[] {
+    const companions: Companion[] = this.myInternalState['activeCompanions'];
+    const ts: TimeState = this.myInternalState['timeState'];
+    const completed: string[] = [];
+
+    const updated = companions.map(c => {
+        if (!c.activePregnancy || ts.day < c.activePregnancy.endDay) return c;
+        // Task complete — award 3-6 mushrooms.
+        const gained = Math.floor(Math.random() * 4) + 3; // 3-6 inclusive
+        const newCount = (c.eggCount ?? 0) + gained;
+        console.log(`Stage: ${c.name} needs to lay eggs. Will lay ${gained}, now carrying ${newCount}.`);
+        completed.push(`${c.name}:${gained}`);
+        return {
+            ...c,
+            eggCount: newCount,
+            activePregnancy: null
+        };
+    });
+
+    if (completed.length > 0) {
+        this.myInternalState['activeCompanions'] = updated;
+    }
+
+    return completed;
+}
+
+// Check if current day is a multiple of 30.
+// If so, consume all mushrooms from all companions and update population.
+checkEggConsumption(): void {
+    const ts: TimeState = this.myInternalState['timeState'];
+    if (ts.day === 0 || ts.day % 30 !== 0) return;
+
+    const companions: Companion[] = this.myInternalState['activeCompanions'];
+    let total = 0;
+
+    const updated = companions.map(c => {
+        const count = c.eggCount ?? 0;
+        total += count;
+        return {...c, eggCount: 0};
+    });
+
+    if (total === 0) return;
+
+    const worldState: WorldState = this.myInternalState['worldState'];
+    const newPop = worldState.aetherPopulation + total;
+    this.myInternalState['worldState'] = {...worldState, aetherPopulation: newPop};
+    this.myInternalState['activeCompanions'] = updated;
+
+    // Flag for AI narration.
+    this.myInternalState['hatchingDayOccurred'] = true;
+    this.myInternalState['hatchingDayAmount'] = total;
+    console.log(`Stage: day ${ts.day} hatching. Hatched ${total} eggs. Population now ${newPop}.`);
+}
+
 longRest(): void {
     const player: PlayerStats = {...this.myInternalState['player']};
     const beforeSeeds = player.seeds;
@@ -1880,6 +2020,27 @@ setTimePeriod(targetPeriod: TimePeriod): void {
             }
         }
 
+        // Check for completed gathering tasks and flag the AI to narrate them.
+        const completedPregnancies = this.checkPregnancyCompletions();
+        if (completedPregnancies.length > 0) {
+            this.myInternalState['completedPregnancyHints'] = completedPregnancies;
+        } else if (this.myInternalState['completedPregnancyHints']) {
+            // Clear after the AI has seen it.
+            delete this.myInternalState['completedPregnancyHints'];
+        }
+
+        // Check for mushroom consumption on multiples of day 30.
+        this.checkEggConsumption();
+
+        // Clear feeding day hint after the AI has seen it.
+        if (this.myInternalState['hatchingDayShown']) {
+            delete this.myInternalState['hatchingDayOccurred'];
+            delete this.myInternalState['hatchingDayAmount'];
+            delete this.myInternalState['hatchingDayShown'];
+        } else if (this.myInternalState['hatchingDayOccurred']) {
+            this.myInternalState['hatchingDayShown'] = true;
+        }
+
         // Clear resolved rolls only after the AI has had a chance to see them.
         // We use a "seen" flag stored alongside rollState to track this.
         const rs: RollState = this.myInternalState['rollState'];
@@ -1909,7 +2070,9 @@ setTimePeriod(targetPeriod: TimePeriod): void {
                 activeCompanions: this.myInternalState['activeCompanions'],
                 currentLocation: this.myInternalState['currentLocation'],
                 rollState: this.myInternalState['rollState'],
-                spellChoice: this.myInternalState['spellChoice']
+                spellChoice: this.myInternalState['spellChoice'],
+                timeState: this.myInternalState['timeState'],
+                worldState: this.myInternalState['worldState']
             },
             /*** @type null | string @description If not null, the user's message itself is replaced
              with this value, both in what's sent to the LLM and in the database. ***/
@@ -1957,7 +2120,9 @@ setTimePeriod(targetPeriod: TimePeriod): void {
                 activeCompanions: this.myInternalState['activeCompanions'],
                 currentLocation: this.myInternalState['currentLocation'],
                 rollState: this.myInternalState['rollState'],
-                spellChoice: this.myInternalState['spellChoice']
+                spellChoice: this.myInternalState['spellChoice'],
+                timeState: this.myInternalState['timeState'],
+                worldState: this.myInternalState['worldState']
             },
             /*** @type null | string @description If not null, the bot's response itself is replaced
              with this value, both in what's sent to the LLM subsequently and in the database. ***/
@@ -2003,6 +2168,7 @@ renderInner(): ReactElement {
     }}>
 {(() => {
     const loc: Location = this.myInternalState['currentLocation'];
+    if (!loc) return null;
     return (
         <div style={{marginBottom: '12px'}}>
             <img
@@ -2361,6 +2527,65 @@ renderInner(): ReactElement {
                 </div>
             );
         })()}
+        {(() => {
+            const msg: string | undefined = this.myInternalState['taskMessage'];
+            if (!msg) return null;
+            return (
+                <div style={{
+                    marginTop: '8px',
+                    padding: '8px',
+                    background: 'rgba(60, 40, 20, 0.4)',
+                    border: '1px solid #6a4a2a',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    color: '#bbb',
+                    fontStyle: 'italic'
+                }}>
+                    {msg}
+                    <button
+                        style={{
+                            display: 'block',
+                            marginTop: '4px',
+                            fontSize: '10px',
+                            padding: '2px 6px',
+                            cursor: 'pointer',
+                            background: 'transparent',
+                            color: '#888',
+                            border: '1px solid #444',
+                            borderRadius: '3px'
+                        }}
+                        onClick={() => {
+                            delete this.myInternalState['taskMessage'];
+                            this.bumpVersion();
+                        }}
+                    >
+                        Dismiss
+                    </button>
+                </div>
+            );
+        })()}
+
+        {(() => {
+            const loc: Location = this.myInternalState['currentLocation'];
+            const aetherIds = ['aetheris_pass', 'aetheris_valley', 'aetheris_ruins', 'aetheris_approach', 'aetheris_throne', 'aetheris_shrine'];
+            if (!aetherIds.includes(loc.id)) return null;
+            const worldState: WorldState = this.myInternalState['worldState'];
+            return (
+                <div style={{
+                    marginTop: '8px',
+                    padding: '8px',
+                    background: 'rgba(40, 40, 60, 0.4)',
+                    border: '1px solid #6a6aaa',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    color: '#bbb'
+                }}>
+                    <span style={{color: '#aac46b', fontWeight: 'bold'}}>Aetheris Population: </span>
+                    <span style={{color: '#e0e0e0'}}>{worldState.aetherPopulation}</span>
+                </div>
+            );
+        })()}
+
         <div style={{
     marginTop: '12px',
     borderTop: '1px solid #444',
@@ -2410,6 +2635,17 @@ renderInner(): ReactElement {
                         const prog = c.bondProgress ?? 0;
                         const cost = BOND_LEVEL_COSTS[lvl];
                         const pct = cost ? Math.min(100, (prog / cost) * 100) : 100;
+                        const pregnancyStatus = this.getPregnancyStatus(c);
+                        const statusColors: {[k: string]: string} = {
+                            early_pregnancy: '#aac46b',
+                            mid_pregnancy: '#ffd56b',
+                            late_pregnancy: '#ff9f43'
+                        };
+                        const statusLabels: {[k: string]: string} = {
+                            early_pregnancy: 'Early Pregnancy',
+                            mid_pregnancy: 'Mid Pregnancy',
+                            late_pregnancy: 'Late Pregnancy'
+                        };
                         return (
                             <div style={{marginTop: '4px', textAlign: 'left'}}>
                                 <div style={{fontSize: '10px', color: '#888', marginBottom: '2px'}}>
@@ -2429,6 +2665,44 @@ renderInner(): ReactElement {
                                         transition: 'width 0.3s'
                                     }}/>
                                 </div>
+                                {(c.eggCount ?? 0) > 0 && (
+                                    <div style={{fontSize: '10px', color: '#aac46b', marginTop: '3px'}}>
+                                        🍄 {c.eggCount} egg{(c.eggCount ?? 0) === 1 ? '' : 's'}
+                                    </div>
+                                )}
+                                {pregnancyStatus ? (
+                                    <div style={{
+                                        fontSize: '10px',
+                                        color: statusColors[pregnancyStatus],
+                                        marginTop: '3px',
+                                        fontStyle: 'italic'
+                                    }}>
+                                        Pregnant — {statusLabels[pregnancyStatus]}
+                                    </div>
+                                ) : (
+                                    <button
+                                        style={{
+                                            marginTop: '4px',
+                                            fontSize: '10px',
+                                            padding: '2px 6px',
+                                            cursor: 'pointer',
+                                            background: '#2a3a2a',
+                                            color: '#aac46b',
+                                            border: '1px solid #4a5a4a',
+                                            borderRadius: '3px',
+                                            width: '100%'
+                                        }}
+                                        onClick={() => {
+                                            const result = this.assignGatheringTask(c.id);
+                                            if (!result.success) {
+                                                this.myInternalState['taskMessage'] = result.message;
+                                            }
+                                            this.bumpVersion();
+                                        }}
+                                    >
+                                        Gather Mushrooms
+                                    </button>
+                                )}
                             </div>
                         );
                     })()}
