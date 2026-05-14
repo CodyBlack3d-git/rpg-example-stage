@@ -292,7 +292,7 @@ const companionRoster: {[id: string]: Companion} = {
         name: 'Niri',
         mood: 'neutral',
         moodImages: {
-            neutral: '/characters/Niri_Neutral.gif',
+            neutral: '/characters/Niri_Neutral.webp',
             happy: '/characters/Niri_Happy.gif',
             exhausted: '/characters/Niri_Exhausted.gif',
             flustered: '/characters/Niri_Flustered.gif',
@@ -410,7 +410,7 @@ const companionRoster: {[id: string]: Companion} = {
         name: 'Vess',
         mood: 'neutral',
         moodImages: {
-            neutral: '/characters/Niri_Neutral.gif',
+            neutral: '/characters/Niri_Neutral.webp',
             happy: '/characters/Niri_Happy.gif',
             exhausted: '/characters/Niri_Exhausted.gif',
             flustered: '/characters/Niri_Flustered.gif',
@@ -475,7 +475,7 @@ const companionRoster: {[id: string]: Companion} = {
         name: 'Anket',
         mood: 'neutral',
         moodImages: {
-            neutral: '/characters/Niri_Neutral.gif',
+            neutral: '/characters/Niri_Neutral.webp',
             happy: '/characters/Niri_Happy.gif',
             exhausted: '/characters/Niri_Exhausted.gif',
             flustered: '/characters/Niri_Flustered.gif',
@@ -540,7 +540,7 @@ const companionRoster: {[id: string]: Companion} = {
         name: 'Sylviana',
         mood: 'neutral',
         moodImages: {
-            neutral: '/characters/Niri_Neutral.gif',
+            neutral: '/characters/Niri_Neutral.webp',
             happy: '/characters/Niri_Happy.gif',
             exhausted: '/characters/Niri_Exhausted.gif',
             flustered: '/characters/Niri_Flustered.gif',
@@ -602,7 +602,7 @@ const companionRoster: {[id: string]: Companion} = {
         name: 'Kessa',
         mood: 'neutral',
         moodImages: {
-            neutral: '/characters/Niri_Neutral.gif',
+            neutral: '/characters/Niri_Neutral.webp',
             happy: '/characters/Niri_Happy.gif',
             exhausted: '/characters/Niri_Exhausted.gif',
             flustered: '/characters/Niri_Flustered.gif',
