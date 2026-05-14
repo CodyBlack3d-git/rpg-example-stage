@@ -293,7 +293,7 @@ const companionRoster: {[id: string]: Companion} = {
         mood: 'neutral',
         moodImages: {
             neutral: '/characters/Niri_Neutral.webp',
-            happy: '/characters/Niri_Happy.gif',
+            aroused: '/characters/Niri_Aroused.webp',
             exhausted: '/characters/Niri_Exhausted.gif',
             flustered: '/characters/Niri_Flustered.gif',
             satisfied: '/characters/Niri_Satisfied.gif',
@@ -411,7 +411,7 @@ const companionRoster: {[id: string]: Companion} = {
         mood: 'neutral',
         moodImages: {
             neutral: '/characters/Niri_Neutral.webp',
-            happy: '/characters/Niri_Happy.gif',
+            aroused: '/characters/Niri_Aroused.webp',
             exhausted: '/characters/Niri_Exhausted.gif',
             flustered: '/characters/Niri_Flustered.gif',
             satisfied: '/characters/Niri_Satisfied.gif',
@@ -476,7 +476,7 @@ const companionRoster: {[id: string]: Companion} = {
         mood: 'neutral',
         moodImages: {
             neutral: '/characters/Niri_Neutral.webp',
-            happy: '/characters/Niri_Happy.gif',
+            aroused: '/characters/Niri_Aroused.webp',
             exhausted: '/characters/Niri_Exhausted.gif',
             flustered: '/characters/Niri_Flustered.gif',
             satisfied: '/characters/Niri_Satisfied.gif',
@@ -541,7 +541,7 @@ const companionRoster: {[id: string]: Companion} = {
         mood: 'neutral',
         moodImages: {
             neutral: '/characters/Niri_Neutral.webp',
-            happy: '/characters/Niri_Happy.gif',
+            aroused: '/characters/Niri_Aroused.webp',
             exhausted: '/characters/Niri_Exhausted.gif',
             flustered: '/characters/Niri_Flustered.gif',
             satisfied: '/characters/Niri_Satisfied.gif',
@@ -603,7 +603,7 @@ const companionRoster: {[id: string]: Companion} = {
         mood: 'neutral',
         moodImages: {
             neutral: '/characters/Niri_Neutral.webp',
-            happy: '/characters/Niri_Happy.gif',
+            aroused: '/characters/Niri_Aroused.webp',
             exhausted: '/characters/Niri_Exhausted.gif',
             flustered: '/characters/Niri_Flustered.gif',
             satisfied: '/characters/Niri_Satisfied.gif',
@@ -1111,7 +1111,7 @@ formatStatsForPrompt(): string {
             return `- ${c.name} (id: ${c.id}, mood: ${c.mood})${abilityStr}${bondStr}${unlocksStr}`;
         }).join('\n');
 
-    const validMoods = ['neutral', 'happy', 'exhausted', 'flustered', 'satisfied', 'embarrassed', 'flirty'];
+    const validMoods = ['neutral', 'aroused', 'exhausted', 'flustered', 'satisfied', 'embarrassed', 'flirty'];
     const knownLocationLines = Object.values(knownLocations)
         .map(l => `- ${l.name} (id: ${l.id})`)
         .join('\n');
@@ -2730,7 +2730,7 @@ renderInner(): ReactElement {
         `You arrive at a strange ruin you've never seen before. [STATE: location=The Sunken Tower]`,
         `You return to the warmth of the tavern. [STATE: location=tavern]`,
         `A trapdoor creaks beneath your boot. You notice the give just in time. [ROLL_REQUEST: ability=dex, dc=14, reason=avoiding a triggered floor trap] [STATE: ]`,
-        `Niri tells you about her favorite childhood meal as you share rations by the fire. [BOND: niri+=1, reason=personal_moment] [STATE: companion.niri.mood=happy]`,
+        `Niri tells you about her favorite childhood meal as you share rations by the fire. [BOND: niri+=1, reason=personal_moment] [STATE: companion.niri.mood=aroused]`,
         `You take an arrow meant for Niri, shielding her without hesitation. [BOND: niri+=2, reason=defending] [STATE: hp-=4, companion.niri.mood=flustered]`,
         `Niri reaches into her satchel for a sigil-seed and channels healing light into your wound. [STATE: hp+=5, seeds-=1]`,
         `You set up camp in a hidden glade. The watchfires burn low; sleep finds you all. [LONG_REST]`,
