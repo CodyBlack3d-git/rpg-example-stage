@@ -292,8 +292,9 @@ const companionRoster: {[id: string]: Companion} = {
         name: 'Niri',
         mood: 'neutral',
         moodImages: {
-            neutral: '/characters/Niri_Neutral.gif',
-            aroused: '/characters/Niri_Aroused.gif',
+            neutral: '/characters/Niri_Neutralv2.gif',
+            laying_egg: '/characters/Niri/EggLaying.gif'
+            aroused: '/characters/Niri_Arousedv2.gif',
             exhausted: '/characters/Niri_Exhausted.gif',
             flustered: '/characters/Niri_Flustered.gif',
             satisfied: '/characters/Niri_Satisfied.gif',
@@ -1111,7 +1112,7 @@ formatStatsForPrompt(): string {
             return `- ${c.name} (id: ${c.id}, mood: ${c.mood})${abilityStr}${bondStr}${unlocksStr}`;
         }).join('\n');
 
-    const validMoods = ['neutral', 'aroused', 'exhausted', 'flustered', 'satisfied', 'embarrassed', 'flirty'];
+    const validMoods = ['neutral', 'aroused', 'exhausted', 'flustered', 'satisfied', 'embarrassed', 'flirty', 'laying_egg'];
     const knownLocationLines = Object.values(knownLocations)
         .map(l => `- ${l.name} (id: ${l.id})`)
         .join('\n');
