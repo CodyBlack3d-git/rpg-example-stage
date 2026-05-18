@@ -20,8 +20,6 @@ type PlayerStats = {
     xp: number;
     inventory: string[];
     abilities: AbilityScores;
-    seeds: number;
-    maxSeeds: number;
     tome: string[];           // spell IDs the player has learned
     classId: string;          // current class id (e.g. 'ranger')
     pendingAbilityPoint: boolean;  // true if a free +1 is waiting to be spent
@@ -138,7 +136,7 @@ type Spell = {
     id: string;              // globally unique, e.g. 'niri_healing_light'
     name: string;            // display name, e.g. 'Healing Light'
     description: string;     // what the spell does, narratively
-    seedCost: number;        // seeds consumed per cast
+    mpCost: number;          // MP consumed per cast (from the casting companion's pool)
     bondRequirement: number; // minimum companion bond level for this spell to unlock
     levelRequirement: number; // minimum player level for this spell to unlock
     effectTags?: string[];   // optional tags like ['heal', 'utility'] — for AI matching
@@ -175,14 +173,21 @@ type Companion = {
     eggCount?: number;          // mushrooms currently carried by this companion
     activePregnancy?: CompanionPregnancy | null; // current gathering task, null if none
     pregnancyFailedText?: string;        // what the companion says when they decline a task
+    mp?: number;                     // current MP, scales with INT and player level
+    maxMp?: number;                  // max MP, recomputed when abilities or level change
 };
 
 // Cumulative cost to reach each bond level. Index 0 = cost to reach level 1.
 // Total to max bond (10): 144 points.
 const BOND_LEVEL_COSTS: number[] = [5, 6, 8, 9, 11, 14, 17, 20, 24, 30];
 
-// Helper: compute max seeds for a given player level. Base 5 + 1 per level.
-const computeMaxSeeds = (level: number): number => 5 + Math.max(1, level);
+// Helper: compute max MP for a companion based on INT and player level.
+// Base 5 + (INT - 10) modifier baseline + 2 per player level.
+// Minimum 1 to prevent zero or negative max.
+const computeCompanionMaxMp = (intScore: number, playerLevel: number): number => {
+    const intBonus = intScore - 10;  // can be negative for low INT
+    return Math.max(1, 5 + intBonus + (playerLevel * 2));
+};
 
 // Bond event types and the points they award. The AI selects from this list
 // when emitting [BOND: ...] tags. Progress-only — no events reduce bond.
@@ -336,7 +341,7 @@ const companionRoster: {[id: string]: Companion} = {
                 id: 'niri_healing_light',
                 name: 'Healing Light',
                 description: 'A pulse of pale-blue motes that mends minor wounds.',
-                seedCost: 1,
+                mpCost: 1,
                 bondRequirement: 0,
                 levelRequirement: 1,
                 effectTags: ['heal']
@@ -345,7 +350,7 @@ const companionRoster: {[id: string]: Companion} = {
                 id: 'niri_read_intent',
                 name: 'Read Intent',
                 description: 'Turquoise eyes glow softly, revealing surface emotions of target.',
-                seedCost: 1,
+                mpCost: 1,
                 bondRequirement: 0,
                 levelRequirement: 1,
                 effectTags: ['divination', 'mental']
@@ -354,7 +359,7 @@ const companionRoster: {[id: string]: Companion} = {
                 id: 'niri_feather_ward',
                 name: 'Feather Ward',
                 description: 'Shimmering down manifests, deflecting one physical attack.',
-                seedCost: 2,
+                mpCost: 2,
                 bondRequirement: 0,
                 levelRequirement: 2,
                 effectTags: ['defense', 'ward']
@@ -363,7 +368,7 @@ const companionRoster: {[id: string]: Companion} = {
                 id: 'niri_wind_lift',
                 name: 'Wind Lift',
                 description: 'Updraft allows brief gliding or softens falls.',
-                seedCost: 2,
+                mpCost: 2,
                 bondRequirement: 1,
                 levelRequirement: 3,
                 effectTags: ['movement', 'wind']
@@ -372,7 +377,7 @@ const companionRoster: {[id: string]: Companion} = {
                 id: 'niri_hearts_song',
                 name: "Heart's Song",
                 description: 'Wordless melody that calms hostility and stirs protective feelings.',
-                seedCost: 3,
+                mpCost: 3,
                 bondRequirement: 2,
                 levelRequirement: 5,
                 effectTags: ['mental', 'charm']
@@ -381,7 +386,7 @@ const companionRoster: {[id: string]: Companion} = {
                 id: 'niri_divine_insight',
                 name: 'Divine Insight',
                 description: 'Avia-Lessa grants vision of optimal path through current crisis.',
-                seedCost: 5,
+                mpCost: 5,
                 bondRequirement: 4,
                 levelRequirement: 8,
                 effectTags: ['divination', 'divine']
@@ -390,7 +395,7 @@ const companionRoster: {[id: string]: Companion} = {
                 id: 'niri_flock_blessing',
                 name: 'Flock Blessing',
                 description: 'Temporary wings sprout on allies, granting flight and aerial combat.',
-                seedCost: 6,
+                mpCost: 6,
                 bondRequirement: 5,
                 levelRequirement: 10,
                 effectTags: ['transform', 'movement']
@@ -399,7 +404,7 @@ const companionRoster: {[id: string]: Companion} = {
                 id: 'niri_fertility_prayer',
                 name: 'Fertility Prayer',
                 description: 'Ancient harpy ritual ensuring conception, heightening pleasure beyond mortal limits.',
-                seedCost: 7,
+                mpCost: 7,
                 bondRequirement: 6,
                 levelRequirement: 12,
                 effectTags: ['divine', 'pleasure', 'conception']
@@ -455,7 +460,7 @@ const companionRoster: {[id: string]: Companion} = {
                 id: 'vess_poison_paralysis',
                 name: 'Paralysis poison',
                 description: 'Applies a paralysis poison that can stop human sized beings from acting for up to 10 minutes.',
-                seedCost: 1,
+                mpCost: 1,
                 bondRequirement: 0,
                 levelRequirement: 1,
                 effectTags: ['poison']
@@ -668,22 +673,22 @@ const knownLocations: {[id: string]: Location} = {
     crypt: {
         id: 'crypt',
         name: 'Last human crypt',
-        image: '/Locations/loc_tavern.png',
+        image: '/Locations/loc_LostCrypt.png',
         description: 'A ruined crypt where Niri awoke Cody from his slumber',
         isKnown: true
     },
     forest: {
         id: 'forest',
-        name: 'Whispering Woods',
+        name: 'Forest',
         image: '/Locations/loc_forest.png',
-        description: 'An ancient forest where the trees seem to murmur.',
+        description: 'A woodland that may seem peaceful, but easily conceals danger, especially when traveling at night.',
         isKnown: true
     },
-    aetheris_pass: {
-        id: 'aetheris_pass',
-        name: 'The Collapsed Pass',
-        image: '/Locations/loc_aetheris_pass.png',
-        description: 'An overgrown rockfall that hides the only entrance to the valley of Aetheris. A narrow gap, only visible on close inspection.',
+    whispering_woods: {
+        id: 'whispering_woods',
+        name: 'Whispering Woods',
+        image: '/Locations/loc_WhisperingWoods.png',
+        description: 'An ancient, enchanting forest where the trees seem to murmur.',
         isKnown: true
     },
     aetheris_valley: {
@@ -729,7 +734,7 @@ const defaultPlayer: PlayerStats = {
     maxMp: 10,
     level: 1,
     xp: 0,
-    inventory: ['Rusty sword', 'Leather armor', 'Healing potion'],
+    inventory: ['Rusty sword', 'Leather armor'],
     abilities: {
         str: 12,
         dex: 14,
@@ -738,8 +743,6 @@ const defaultPlayer: PlayerStats = {
         wis: 13,
         cha: 11
     },
-    seeds: 6,    // base 5 + level 1
-    maxSeeds: 6,
     tome: [],    // empty grimoire to start
     classId: 'ranger',  // default class — player can change in chat 0
     pendingAbilityPoint: false
@@ -756,9 +759,6 @@ const mergedPlayer: PlayerStats = savedPlayer
         ...defaultPlayer,
         ...savedPlayer,
         abilities: {...defaultPlayer.abilities, ...(savedPlayer.abilities ?? {})},
-        // Backfill seed fields. If they're missing, scale to current level.
-        maxSeeds: savedPlayer.maxSeeds ?? computeMaxSeeds(savedPlayer.level ?? 1),
-        seeds: savedPlayer.seeds ?? computeMaxSeeds(savedPlayer.level ?? 1),
         tome: savedPlayer.tome ?? [],
         classId: savedPlayer.classId ?? 'ranger',
         pendingAbilityPoint: savedPlayer.pendingAbilityPoint ?? false
@@ -772,6 +772,10 @@ const mergedCompanions: Companion[] = savedCompanions
         if (!c.isRoster) return c;
         const fromRoster = companionRoster[c.id];
         if (!fromRoster) return c;
+        const abilities = c.abilities ?? fromRoster.abilities;
+        const intScore = abilities?.int ?? 10;
+        const playerLevel = mergedPlayer.level;
+        const maxMp = computeCompanionMaxMp(intScore, playerLevel);
         return {
             ...fromRoster,
             ...c,
@@ -782,12 +786,20 @@ const mergedCompanions: Companion[] = savedCompanions
             moodImages: fromRoster.moodImages,
             bondLevel: c.bondLevel ?? 0,
             bondProgress: c.bondProgress ?? 0,
-            mushroomCount: c.eggCount ?? 0,
-            activeTask: c.activePregnancy ?? null,
-            taskDeclineText: fromRoster.pregnancyFailedText,
+            eggCount: c.eggCount ?? 0,
+            activePregnancy: c.activePregnancy ?? null,
+            pregnancyFailedTextText: fromRoster.pregnancyFailedText,
             socialUnlocks: c.socialUnlocks ?? fromRoster.socialUnlocks ?? [],
-            spellList: fromRoster.spellList ?? []
+            spellList: fromRoster.spellList ?? [],
+            maxMp,
+            mp: c.mp ?? maxMp  // preserve current MP on reload, but cap at new max below
         };
+    }).map(c => {
+        // Clamp current MP to max after backfilling.
+        if (c.maxMp !== undefined && c.mp !== undefined && c.mp > c.maxMp) {
+            return {...c, mp: c.maxMp};
+        }
+        return c;
     })
     : defaultActiveCompanions;
 
@@ -853,8 +865,6 @@ this.myInternalState = {
                     ...(currentPlayer.abilities),
                     ...(incomingPlayer.abilities ?? {})
                 },
-                seeds: incomingPlayer.seeds ?? currentPlayer.seeds,
-                maxSeeds: incomingPlayer.maxSeeds ?? currentPlayer.maxSeeds,
                 tome: incomingPlayer.tome ?? currentPlayer.tome ?? [],
                 classId: incomingPlayer.classId ?? currentPlayer.classId ?? 'ranger',
                 pendingAbilityPoint: incomingPlayer.pendingAbilityPoint ?? currentPlayer.pendingAbilityPoint ?? false
@@ -868,6 +878,9 @@ this.myInternalState = {
                 if (!c.isRoster) return c;
                 const fromRoster = roster[c.id];
                 if (!fromRoster) return c;
+                const abilities = c.abilities ?? fromRoster.abilities;
+                const intScore = abilities?.int ?? 10;
+                const maxMp = computeCompanionMaxMp(intScore, mergedPlayer.level);
                 return {
                     ...fromRoster,
                     ...c,
@@ -878,11 +891,13 @@ this.myInternalState = {
                     moodImages: fromRoster.moodImages,
                     bondLevel: c.bondLevel ?? 0,
                     bondProgress: c.bondProgress ?? 0,
-                    mushroomCount: c.eggCount ?? 0,
-                    activeTask: c.activePregnancy ?? null,
-                    taskDeclineText: fromRoster.pregnancyFailedText,
+                    eggCount: c.eggCount ?? 0,
+                    activePregnancy: c.activePregnancy ?? null,
+                    pregnancyFailedTextText: fromRoster.pregnancyFailedText,
                     socialUnlocks: c.socialUnlocks ?? fromRoster.socialUnlocks ?? [],
-                    spellList: fromRoster.spellList ?? []
+                    spellList: fromRoster.spellList ?? [],
+                    maxMp,
+                    mp: c.mp !== undefined ? Math.min(c.mp, maxMp) : maxMp
                 };
             })
             : (this.myInternalState['activeCompanions'] as Companion[]);
@@ -1073,7 +1088,7 @@ formatStatsForPrompt(): string {
             const entry = allSpells[id];
             if (!entry) return `- ${id} (unknown — teacher not in party?)`;
             const s = entry.spell;
-            return `- ${s.name} (id: ${s.id}, cost: ${s.seedCost}, taught by ${entry.teacherName}): ${s.description}`;
+            return `- ${s.name} (id: ${s.id}, cost: ${s.mpCost}, taught by ${entry.teacherName}): ${s.description}`;
         }).join('\n');
 
     // For each companion, list which of their spells are available to *them* given current bond.
@@ -1087,7 +1102,7 @@ formatStatsForPrompt(): string {
                   && s.levelRequirement <= player.level
             );
             if (available.length === 0) return `- ${c.name}: (none yet)`;
-            const list = available.map(s => `${s.name} (cost: ${s.seedCost})`).join(', ');
+            const list = available.map(s => `${s.name} (cost: ${s.mpCost})`).join(', ');
             return `- ${c.name}: ${list}`;
         }).join('\n');
 
@@ -1129,7 +1144,6 @@ formatStatsForPrompt(): string {
     return `[CURRENT PLAYER STATE]
 HP: ${player.hp}/${player.maxHp}
 MP: ${player.mp}/${player.maxMp}
-Seeds: ${player.seeds}/${player.maxSeeds}
 Class: ${classLine}
 Level: ${player.level}, XP: ${xpStr}${levelUpHint}${abilityPointHint}
 Inventory: ${inv}
@@ -1162,17 +1176,26 @@ ${knownLocationLines}
 
 [AETHERIS POPULATION]
 Current population: ${(this.myInternalState['worldState'] as WorldState).aetherPopulation}
-Eggs hatch new settlers: 1 egg = 1 population, hatched every 30 days automatically.
+Population grows through two means:
+1. Eggs hatch new settlers: 1 egg = 1 population, hatched every 30 days automatically.
+2. Story events: rescuing people, convincing tribes to join the cause, sheltering refugees, recovering scattered survivors. Use the population tag for these.
+
+Population rules:
+- When a story event would meaningfully grow the population, emit on its own line: [POPULATION: +=N, reason=<short event tag>]
+- Valid reason tags: rescued_refugees, tribe_joined, survivors_recovered, sheltered_travelers, diplomatic_success
+- Scale matters: a single survivor rescued is +1, a small group is +3-5, a tribe joining the cause is +10-25 depending on size, an entire surviving settlement integrating is +30+.
+- This is a significant event — don't use it for casual mentions of people existing in the world. Use it when the party has actually done something that grows Aetheris specifically.
+- The AI determines the amount based on narrative scope. Be honest about scale — small acts of help grow the population slowly; major successes grow it dramatically.
 [/AETHERIS POPULATION]
 
 ${(() => {
-    const hints: string[] = this.myInternalState['completedTaskHints'] ?? [];
+    const hints: string[] = this.myInternalState['completedPregnancyHints'] ?? [];
     if (hints.length === 0) return '';
     const lines = hints.map(h => {
         const [name, gained] = h.split(':');
-        return `** ${name} is about to lay ${gained} eggs. Narrate a brief moment where the party finds a safe location for the eggs to be laid, with a scene that has sexual undertones. **`;
+        return `** ${name} is about to lay ${gained} eggs. Narrate a brief moment where the party finds a safe location for the eggs to be laid. **`;
     }).join('\n');
-    return `[TASK COMPLETION]\n${lines}\n[/TASK COMPLETION]\n`;
+    return `[PREGNANCY COMPLETION]\n${lines}\n[/PREGNANCY COMPLETION]\n`;
 })()}
 ${(() => {
     if (!this.myInternalState['hatchingDayOccurred']) return '';
@@ -1184,116 +1207,84 @@ ${(() => {
 [ROLL]
 ${this.formatRollBlock()}
 [/ROLL]
+End every response with: [STATE: hp=N, inventory+=Item, companion.id.mood=mood, companion+=Name, companion-=id, location=NameOrId]
+- = sets, += adds, -= subtracts/removes. Numeric: hp, maxHp, mp, maxMp, level, xp.
+- Inventory items are strings; remove by exact name.
+- Companion moods: ${validMoods.join(', ')}
+- Only include changed fields. If nothing changed, output [STATE: ].
 
-You MUST end every response with a state update block in this exact format on its own line:
-[STATE: hp=N, inventory+=ItemName, companion.id.mood=mood, companion+=Name, companion-=id, location=LocationNameOrId]
+Optional tags (own line each, when applicable):
 
-When the player attempts something with meaningful uncertainty, you may also include a roll request, on its own line:
-[ROLL_REQUEST: ability=wis, dc=15, reason=spotting hidden tracks]
+[ROLL_REQUEST: ability=wis, dc=15, reason=short phrase]
+- ability required (str/dex/con/int/wis/cha). dc optional but recommended (easy 10, medium 15, hard 20, very hard 25).
+- for=companion_id makes the companion roll instead.
+- Max one per response. After requesting, end on suspense — do NOT preempt the outcome.
+- Roll for things with stakes. Skip trivial actions.
 
-Roll request rules:
-- ability is required: str, dex, con, int, wis, or cha (lowercase).
-- dc is optional but recommended. Easy 10, medium 15, hard 20, very hard 25.
-- reason is required: a short phrase explaining what the check is for.
-- for=companion_id is optional: ask a companion to roll instead of the player.
-- Maximum one [ROLL_REQUEST] per response. After requesting, end your narration on a moment of suspense — DO NOT preempt the outcome.
-- Roll for things with stakes (combat, perception, persuasion, athletic feats, lore). Don't roll for trivial actions.
+[BOND: <id>+=<amount>, reason=<event>]
+- Bond is per-companion, 0-10, only goes up.
+- Events: personal_moment (+1), quest_assist (+1), intimacy (+2), impregnated (+2).
+- One bond event per response max. Only for meaningful moments — not greetings or routine.
+- When unlocked beats appear in ACTIVE COMPANIONS, weave them in organically.
 
-Player rules:
-- Use = to set (hp=15), += to add (xp+=50), -= to subtract or remove (inventory-=Healing potion).
-- Numeric fields: hp, maxHp, mp, maxMp, level, xp.
-- Inventory: items are strings; remove by exact name match.
+[POPULATION: +=N, reason=<tag>]
+- For story-driven growth at Aetheris (not egg hatching — that's automatic).
+- Tags: rescued_refugees, tribe_joined, survivors_recovered, sheltered_travelers, diplomatic_success.
+- Scale: single survivor +1, small group +3-5, tribe +10-25, whole settlement +30+.
+- Only for events that actually grow Aetheris specifically.
 
-Companion rules:
-- To change a roster companion's mood, use companion.<id>.mood=<mood>.
-- Valid moods for Niri: ${validMoods.join(', ')}
-- To add a companion: companion+=<Name>. To remove: companion-=<id or name>.
+[LONG_REST]
+- Used when the party rests safely (inn, defensible camp, sanctuary).
+- Restores HP and MP for everyone. Don't include those in [STATE].
+- Don't spam. May decline if unsafe.
 
-Bond rules:
-- Bond is per-companion, 0-10. It only goes up, never down.
-- Award bond on its own line via: [BOND: <id>+=<amount>, reason=<event>]
-- Valid events and their amounts:
-  * personal_moment (+1): sharing a meal, quiet conversation, asking about their past
-  * quest_assist (+1): companion was meaningfully helpful toward a player goal
-  * intimacy (+2): player had sexual encounter that led one or both to reach orgasm
-  * impregnated (+2): player successfully impregnated companion and they now carry fertile eggs
-- Award bond sparingly. One bond event per response, at most. Only emit when a meaningful moment actually occurred — not for every kind word.
-- Do NOT award bond for casual greetings, mundane interactions, or doing things companions would do anyway.
-- Award the lower amount when in doubt; the system rewards consistent care over time.
-- When a companion has unlocked social beats (shown in the ACTIVE COMPANIONS block), naturally weave them into your narration — share the detail, use the nickname, etc. The unlock is permission, not obligation; let it happen organically.
+[TIME: advance=N] or [TIME: set=<period>]
+- Periods: morning, midday, afternoon, evening, night, late_night.
+- advance=1 for travel between nearby places, 2+ for long journeys.
+- set=evening jumps directly (wraps to next day if backward).
+- Use time to color narration. Don't advance every turn — match what the scene earned.
+- Long rest auto-advances to next morning; don't combine with TIME tags.
 
-Seed rules:
-- Seeds are a player resource that companions consume to cast their spells. They are shown in the player state.
-- Companions cannot cast spells if the player's seeds are 0. Don't have a companion attempt magic when seeds=0.
-- When a companion casts a spell, deduct the cost via [STATE: seeds-=N] in your response.
-- Seeds replenish only on long rest. Don't restore them through other means (potions, items, etc.) unless explicitly part of player inventory or scene logic.
-- Companions cannot share or transfer seeds between each other. Once consumed, the seed is gone until rest.
+Location:
+- location=<id or display name>. Known matches use full data; unknown becomes uncharted.
+- Only emit when the party actually moves.
 
-Spell casting rules:
-- Companions cast their own spells; the player does not cast directly.
-- A companion can ONLY cast a spell that appears in their COMPANION SPELL ACCESS list above. Do not invent spells, repurpose other companions' spells, or cast a spell the companion hasn't unlocked through bond.
-- The TOME shows which spells the player has learned through bond growth. The tome is descriptive: it tracks the player's relationship-built knowledge. A companion can still cast their own unlocked spells regardless of tome, but the tome reflects the magical bond between player and companion.
-- When a companion casts: narrate the moment in-character (the gesture, the visual, the cost), then deduct seeds via [STATE: seeds-=N] where N matches the spell's seed cost.
-- If the player asks a companion to cast something not in COMPANION SPELL ACCESS, narrate the companion struggling, declining, or admitting they don't know it. Don't pretend they can.
-- If the player asks for a spell when seeds=0, the companion cannot comply. Narrate the strain, the moment of helplessness — turn it into character.
-- Don't have companions cast unprompted in trivial moments. Save magic for stakes.
+Spell casting:
+- Companions cast their own spells from COMPANION SPELL ACCESS. Don't invent or repurpose.
+- Each companion has their own MP pool. Deduct via [STATE: companion.id.mp-=N] matching the spell's cost.
+- A companion with mp=0 cannot cast. Narrate the strain or empty reserves as character.
+- TOME shows what the player has learned through bond. Descriptive — companions cast regardless.
+- Don't cast unprompted in trivial moments. Save magic for stakes.
 
-Long rest rules:
-- A long rest occurs when the party rests in a safe location — an inn, a defensible camp, sanctuary. It's a full night's recovery.
-- When the narrative reaches a clear long rest moment, declare it on its own line: [LONG_REST]
-- A long rest restores HP, MP, and seeds to maximum. Don't include those individual stat changes in [STATE: ] — the rest tag handles them.
-- Don't spam long rests. They're a meaningful pause, not a casual recovery. If the player asks to rest somewhere unsafe or hostile, you may decline narratively.
-- The player can also trigger a long rest via the UI; you'll see seeds/HP/MP refilled when that happens.
+Roll interpretation (when [ROLL] shows "Just resolved..."):
+- Narrate the outcome and move forward. Don't request a new roll for the same situation.
+- Natural 1 = notable mishap. Natural 20 = notable success. Regardless of total.
+- With DC: meet/exceed = SUCCESS, fall short = FAILURE. Margins matter: beat by 10+ is triumph; miss by 10+ is disastrous.
+- No DC: 1-5 poor, 6-10 middling, 11-15 solid, 16-20 clean, 21+ exceptional.
+- Common sense overrides dice. Natural 20 to lift a mountain still fails interestingly.
+- "Awaiting..." means you already asked — continue with suspense, do NOT narrate outcome, do NOT request another roll.
 
-Time rules:
-- Time tracks day number (starting day 0) and period: morning, midday, afternoon, evening, night, late_night.
-- Use the time naturally to color narration. "Sunlight slants across the floor" at midday, "the tavern's lanterns are lit" at evening, "the road is empty under starlight" at late night.
-- Advance time on its own line via tags:
-  * [TIME: advance=N] — move forward N period steps (1-3 typical). 
-  * [TIME: set=<period>] — jump directly to a named period (wraps to next day if backward).
-- Pacing guidelines (use as needed, not strict math):
-  * Short scene, one conversation, one quick action: usually no advance.
-  * Travel between nearby locations or a longer scene: advance=1.
-  * Travel across distance, extended exploration, eventful chapter: advance=2 or more.
-  * Reaching a destination "by evening" or similar: use [TIME: set=evening].
-- Long rest (handled by [LONG_REST]) automatically advances to next morning. Don't combine [LONG_REST] with [TIME: ...] tags.
-- Don't advance time on every message. The clock should match what the narration earned.
+Encounter scaling:
+Tiers: 1 = lvl 1-4, 2 = lvl 5-8, 3 = lvl 9-12, 4 = lvl 13+.
+Current player: lvl ${player.level} (Tier ${player.level <= 4 ? 1 : player.level <= 8 ? 2 : player.level <= 12 ? 3 : 4})
+Tier gap (player vs creature):
+- Same tier: fair fight, uncertain outcome.
+- +1 above player: significant challenge, retreat valid.
+- +2 above: direct combat inadvisable, survival = success.
+- +3+: effectively impossible, run.
+- -1 below: manageable.
+- -2+ below: trivial.
+Each creature's tier is in its lorebook entry.
 
-Location rules:
-- To change location, use location=<id or display name>. If it matches a known location id or name, full details are used. Otherwise it's treated as a new unknown place.
-- Only emit location= when the party actually moves to a new place. Don't emit it for stays.
-
-Roll interpretation:
-- The [ROLL] block above tells you the roll status.
-- "No active roll" — fine to request one if appropriate, otherwise ignore.
-- "Awaiting player to resolve..." — you already asked. Continue the scene with suspense, do NOT narrate an outcome, do NOT request another roll.
-- "Just resolved..." — narrate the outcome and move the scene forward. Use these guidelines:
-  * Natural 1 (raw): notable mishap regardless of total
-  * Natural 20 (raw): notable success regardless of total
-  * If a DC was set: [SUCCESS] meets/exceeds the bar; [FAILURE] falls short. Margins matter — beating DC by 10+ is a triumph; missing by 10+ is disastrous.
-  * If no DC: total 1-5 poor, 6-10 middling with cost, 11-15 solid, 16-20 clean, 21+ exceptional.
-  * Don't let dice override common sense. A natural 20 to lift a mountain still fails interestingly.
-
-Encounter scaling reference:
-Player tiers: level 1-4 = Tier 1, level 5-8 = Tier 2, level 9-12 = Tier 3, level 13+ = Tier 4.
-Current player level: ${player.level} (Tier ${player.level <= 4 ? 1 : player.level <= 8 ? 2 : player.level <= 12 ? 3 : 4})
-
-Encounter difficulty by tier gap:
-- Same tier: fair fight, outcome uncertain, skill and tactics matter.
-- One tier above player: significant challenge, retreat is a valid option.
-- Two tiers above player: direct combat is inadvisable, survival is success.
-- Three or more tiers above: effectively impossible, run.
-- One tier below player: manageable, low risk.
-- Two or more tiers below player: trivial, barely worth rolling.
-
-Each creature or threat has a tier noted in its lorebook entry. Use the gap between player tier and creature tier to calibrate how the encounter feels — pacing, tension, roll difficulty, and consequences of failure.
-
-Encounter rules:
-
-General rules:
-- Only include fields that changed.
-- If nothing changed, output [STATE: ] with nothing inside.
-- - Do not invent fields beyond those listed.`;
+Encounters:
+- Introduce threats proactively. Don't wait for the player to ask.
+- Wilderness and roads invite threats; towns and Aetheris are safer.
+- Ogres are apex threats — tension and flight, not winnable fights at low level.
+- Introduce creatures via perception first (sound, movement, silhouette), then reveal.
+- Combat is narrative and roll-driven, not damage-tracked. Use STR for force, DEX for evasion, CON for endurance, WIS for reading the enemy, INT for magical attacks.
+- HP as rough tracker: >75% fine, 50-75% hurt, 25-50% wounded, <25% critical.
+- Encounters can resolve via stealth, talk, distraction, submission or flight. Reward cleverness.
+- After significant encounters, show the world reacting.`;
 }
             parseStateUpdate(text: string): {cleanedText: string, applied: boolean} {
     // First: strip and parse any roll request.
@@ -1395,12 +1386,46 @@ General rules:
         workingText = workingText.replace(tag, '').trim();
     }
 
+    // Strip and apply any population tags. Format: [POPULATION: +=N, reason=rescued_refugees]
+    const popRegex = /\[POPULATION:([^\]]*)\]/gi;
+    let popMatch: RegExpExecArray | null;
+    let appliedPop = false;
+    const popMatches: string[] = [];
+    while ((popMatch = popRegex.exec(workingText)) !== null) {
+        popMatches.push(popMatch[0]);
+        const popContent = popMatch[1].trim();
+        const parts = popContent.split(',').map(s => s.trim()).filter(s => s.length > 0);
+        let amount: number = 0;
+        let reason: string = '';
+        for (const p of parts) {
+            const addMatch = p.match(/^\+=\s*(\d+)$/);
+            if (addMatch) {
+                amount = parseInt(addMatch[1], 10);
+                continue;
+            }
+            const reasonMatch = p.match(/^reason\s*=\s*(.+)$/i);
+            if (reasonMatch) {
+                reason = reasonMatch[1].trim().toLowerCase();
+                continue;
+            }
+        }
+        if (amount > 0) {
+            this.applyPopulationChange(amount, reason || 'unspecified');
+            appliedPop = true;
+        } else {
+            console.warn('Stage: malformed POPULATION tag:', popContent);
+        }
+    }
+    for (const tag of popMatches) {
+        workingText = workingText.replace(tag, '').trim();
+    }
+
     // Then: find the state block in the (possibly stripped) text.
     const stateRegex = /\[STATE:([^\]]*)\]/i;
     const match = workingText.match(stateRegex);
 
     if (!match) {
-        return {cleanedText: workingText, applied: appliedRoll || appliedBond || appliedRest || appliedTime};
+        return {cleanedText: workingText, applied: appliedRoll || appliedBond || appliedRest || appliedTime || appliedPop};
     }
 
     const stateContent = match[1].trim();
@@ -1464,7 +1489,6 @@ General rules:
     // Clamp HP/MP/seeds to valid ranges.
     player.hp = Math.max(0, Math.min(player.hp, player.maxHp));
     player.mp = Math.max(0, Math.min(player.mp, player.maxMp));
-    player.seeds = Math.max(0, Math.min(player.seeds, player.maxSeeds));
 
     this.myInternalState['player'] = player;
 
@@ -1679,15 +1703,12 @@ classTraitBonuses(level: number, classId: string): {[target in ClassTraitTarget]
     return {[cls.traitTarget]: ticks};
 }
 
-// Recompute maxHp and maxSeeds from base + level + class trait.
-// Returns the recomputed values without mutating state.
-computeDerivedStats(level: number, classId: string): {maxHp: number; maxSeeds: number} {
-    const baseMaxHp = 20 + (level - 1) * 2;  // start 20, +2 per level after 1
-    const baseMaxSeeds = computeMaxSeeds(level);
+// Recompute maxHp from base + level + class trait.
+computeDerivedStats(level: number, classId: string): {maxHp: number} {
+    const baseMaxHp = 20 + (level - 1) * 2;
     const traits = this.classTraitBonuses(level, classId);
     return {
-        maxHp: baseMaxHp + (traits.maxHp ?? 0),
-        maxSeeds: baseMaxSeeds + (traits.maxSeeds ?? 0)
+        maxHp: baseMaxHp + (traits.maxHp ?? 0)
     };
 }
 
@@ -1724,32 +1745,48 @@ scaleCompanionAbilities(): void {
     const companions: Companion[] = this.myInternalState['activeCompanions'];
 
     const scaled = companions.map(c => {
-        if (!c.isRoster || !c.primaryStat) return c;
+        if (!c.isRoster) return c;
+        const newAbilities = c.primaryStat
+            ? this.computeCompanionAbilities(c, player.level)
+            : c.abilities;
+        const intScore = newAbilities?.int ?? 10;
+        const newMaxMp = computeCompanionMaxMp(intScore, player.level);
+        // Preserve current MP ratio when max changes.
+        const currentRatio = c.maxMp && c.mp !== undefined ? c.mp / c.maxMp : 1;
+        const newMp = Math.min(newMaxMp, Math.round(newMaxMp * currentRatio));
         return {
             ...c,
-            abilities: this.computeCompanionAbilities(c, player.level)
+            abilities: newAbilities,
+            maxMp: newMaxMp,
+            mp: newMp
         };
     });
 
     this.myInternalState['activeCompanions'] = scaled;
 
-    // Also scale roster companions not currently active,
-    // so they're correct when they join later.
+    // Also scale roster companions not currently active.
     const roster: {[id: string]: Companion} = this.myInternalState['companionRoster'];
     const scaledRoster: {[id: string]: Companion} = {};
     for (const [id, c] of Object.entries(roster)) {
-        if (!c.isRoster || !c.primaryStat) {
+        if (!c.isRoster) {
             scaledRoster[id] = c;
             continue;
         }
+        const newAbilities = c.primaryStat
+            ? this.computeCompanionAbilities(c, player.level)
+            : c.abilities;
+        const intScore = newAbilities?.int ?? 10;
+        const newMaxMp = computeCompanionMaxMp(intScore, player.level);
         scaledRoster[id] = {
             ...c,
-            abilities: this.computeCompanionAbilities(c, player.level)
+            abilities: newAbilities,
+            maxMp: newMaxMp,
+            mp: newMaxMp  // off-party companions stay at full
         };
     }
     this.myInternalState['companionRoster'] = scaledRoster;
 
-    console.log(`Stage: companion abilities scaled to player level ${player.level}.`);
+    console.log(`Stage: companion abilities and MP scaled to player level ${player.level}.`);
 }
 
 // Check XP and apply level-ups if thresholds were crossed.
@@ -1771,9 +1808,7 @@ checkLevelUp(): boolean {
         // Recompute and apply derived caps. Heal to new max as a level-up reward.
         const derived = this.computeDerivedStats(player.level, player.classId);
         player.maxHp = derived.maxHp;
-        player.maxSeeds = derived.maxSeeds;
         player.hp = player.maxHp;
-        player.seeds = player.maxSeeds;
         this.myInternalState['player'] = player;
         // Flag for the AI's next turn to narrate the moment.
         this.myInternalState['justLeveled'] = true;
@@ -1813,10 +1848,7 @@ setClass(classId: string): void {
     player.classId = classId;
     const derived = this.computeDerivedStats(player.level, classId);
     player.maxHp = derived.maxHp;
-    player.maxSeeds = derived.maxSeeds;
-    // Clamp current to new caps.
     player.hp = Math.min(player.hp, player.maxHp);
-    player.seeds = Math.min(player.seeds, player.maxSeeds);
     this.myInternalState['player'] = player;
     console.log(`Stage: class set to ${classId}.`);
 }
@@ -1834,7 +1866,7 @@ getPregnancyStatus(companion: Companion): 'early_pregnancy' | 'mid_pregnancy' | 
 
 // Attempt to assign a mushroom gathering task to a companion.
 // Rolls companion CHA vs DC 15. Returns true if task started, false if declined.
-assignGatheringTask(companionId: string): {success: boolean; message: string} {
+assignActivePregnancy(companionId: string): {success: boolean; message: string} {
     const companions: Companion[] = this.myInternalState['activeCompanions'];
     const companion = companions.find(c => c.id === companionId);
 
@@ -1927,19 +1959,37 @@ checkEggConsumption(): void {
     console.log(`Stage: day ${ts.day} hatching. Hatched ${total} eggs. Population now ${newPop}.`);
 }
 
+applyPopulationChange(amount: number, reason: string): void {
+    if (amount <= 0) {
+        console.warn(`Stage: population change must be positive (got ${amount})`);
+        return;
+    }
+    const worldState: WorldState = this.myInternalState['worldState'];
+    const newPop = worldState.aetherPopulation + amount;
+    this.myInternalState['worldState'] = {...worldState, aetherPopulation: newPop};
+    console.log(`Stage: Aetheris population +${amount} (${reason}). Now ${newPop}.`);
+}
+
 longRest(): void {
     const player: PlayerStats = {...this.myInternalState['player']};
-    const beforeSeeds = player.seeds;
     const beforeHp = player.hp;
     const beforeMp = player.mp;
-    player.seeds = player.maxSeeds;
     player.hp = player.maxHp;
     player.mp = player.maxMp;
     this.myInternalState['player'] = player;
-    // Long rest advances to morning of the next day.
+
+    // Refill all companion MP.
+    const companions: Companion[] = this.myInternalState['activeCompanions'];
+    const refilled = companions.map(c => {
+        if (c.maxMp !== undefined) return {...c, mp: c.maxMp};
+        return c;
+    });
+    this.myInternalState['activeCompanions'] = refilled;
+
+    // Advance to morning of next day.
     const ts: TimeState = this.myInternalState['timeState'];
     this.myInternalState['timeState'] = {day: ts.day + 1, period: 'morning'};
-    console.log(`Stage: long rest. Seeds ${beforeSeeds}→${player.seeds}, HP ${beforeHp}→${player.hp}, MP ${beforeMp}→${player.mp}. Time → Day ${ts.day + 1}, morning.`);
+    console.log(`Stage: long rest. HP ${beforeHp}→${player.hp}, MP ${beforeMp}→${player.mp}. All companion MP refilled. Time → Day ${ts.day + 1}, morning.`);
 }
 applyLocationChange(nameOrId: string): void {
     const known: {[id: string]: Location} = this.myInternalState['knownLocations'];
@@ -2169,50 +2219,58 @@ render(): ReactElement {
 renderInner(): ReactElement {
     const player: PlayerStats = this.myInternalState['player'];
 
-      return <div style={{
+     return <div style={{
         width: '100%',
         minHeight: '100vh',
         padding: '12px',
         fontFamily: 'system-ui, sans-serif',
         color: '#e0e0e0',
-        background: 'rgba(20, 20, 30, 0.85)',
         boxSizing: 'border-box',
-        overflowY: 'auto'
+        overflowY: 'auto',
+        position: 'relative',
+        backgroundImage: this.myInternalState['currentLocation']
+            ? `url(${(this.myInternalState['currentLocation'] as Location).image})`
+            : 'none',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundAttachment: 'fixed',
+        backgroundRepeat: 'no-repeat'
     }}>
+        <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(15, 15, 25, 0.82)',
+            pointerEvents: 'none',
+            zIndex: 0
+        }}/>
+        <div style={{position: 'relative', zIndex: 1}}>
 {(() => {
     const loc: Location = this.myInternalState['currentLocation'];
     if (!loc) return null;
+    const ts: TimeState = this.myInternalState['timeState'];
     return (
-        <div style={{marginBottom: '12px'}}>
-            <img
-                src={loc.image}
-                alt={loc.name}
-                style={{
-                    width: '100%',
-                    maxHeight: '180px',
-                    objectFit: 'cover',
-                    borderRadius: '6px',
-                    display: 'block'
-                }}
-            />
+        <div style={{
+            marginBottom: '12px',
+            padding: '6px 10px',
+            background: 'rgba(0, 0, 0, 0.4)',
+            borderRadius: '6px',
+            backdropFilter: 'blur(2px)'
+        }}>
             <div style={{
-                fontSize: '13px',
+                fontSize: '14px',
                 fontWeight: 'bold',
-                marginTop: '4px',
                 color: loc.isKnown ? '#e0e0e0' : '#bbb',
                 fontStyle: loc.isKnown ? 'normal' : 'italic'
             }}>
                 {loc.name}
                 {!loc.isKnown && <span style={{fontSize: '10px', marginLeft: '6px', color: '#888'}}>(uncharted)</span>}
             </div>
-            {(() => {
-                const ts: TimeState = this.myInternalState['timeState'];
-                return (
-                    <div style={{fontSize: '11px', color: '#999', marginTop: '2px'}}>
-                        Day {ts.day} · {ts.period.replace('_', ' ')}
-                    </div>
-                );
-            })()}
+            <div style={{fontSize: '11px', color: '#bbb', marginTop: '2px'}}>
+                Day {ts.day} · {ts.period.replace('_', ' ')}
+            </div>
         </div>
     );
 })()}
@@ -2232,7 +2290,6 @@ renderInner(): ReactElement {
             <div>MP: <span style={{color: '#6bb6ff'}}>{player.mp}/{player.maxMp}</span></div>
             <div>Lvl: <span style={{color: '#ffd56b'}}>{player.level}</span></div>
             <div>XP: {player.xp}{LEVEL_XP_COSTS[player.level - 1] !== undefined ? `/${LEVEL_XP_COSTS[player.level - 1]}` : ''}</div>
-            <div>Seeds: <span style={{color: '#aac46b'}}>{player.seeds}/{player.maxSeeds}</span></div>
         </div>
 
         {player.pendingAbilityPoint && (
@@ -2351,7 +2408,7 @@ renderInner(): ReactElement {
                                     <li key={id} title={entry.spell.description}>
                                         <strong>{entry.spell.name}</strong>{' '}
                                         <span style={{fontSize: '10px', color: '#888'}}>
-                                            ({entry.spell.seedCost} seed{entry.spell.seedCost === 1 ? '' : 's'}, {entry.teacherName})
+                                            ({entry.spell.mpCost} seed{entry.spell.mpCost === 1 ? '' : 's'}, {entry.teacherName})
                                         </span>
                                     </li>
                                 );
@@ -2401,7 +2458,7 @@ renderInner(): ReactElement {
                                 <div style={{fontWeight: 'bold'}}>
                                     {spell.name}{' '}
                                     <span style={{color: '#888', fontWeight: 'normal'}}>
-                                        ({spell.seedCost} seed{spell.seedCost === 1 ? '' : 's'})
+                                        ({spell.mpCost} seed{spell.mpCost === 1 ? '' : 's'})
                                     </span>
                                 </div>
                                 <div style={{color: '#aaa', marginTop: '2px'}}>{spell.description}</div>
@@ -2541,7 +2598,7 @@ renderInner(): ReactElement {
             );
         })()}
         {(() => {
-            const msg: string | undefined = this.myInternalState['taskMessage'];
+            const msg: string | undefined = this.myInternalState['pregnancyMessage'];
             if (!msg) return null;
             return (
                 <div style={{
@@ -2568,7 +2625,7 @@ renderInner(): ReactElement {
                             borderRadius: '3px'
                         }}
                         onClick={() => {
-                            delete this.myInternalState['taskMessage'];
+                            delete this.myInternalState['pregnancyMessage'];
                             this.bumpVersion();
                         }}
                     >
@@ -2706,14 +2763,14 @@ renderInner(): ReactElement {
                                             width: '100%'
                                         }}
                                         onClick={() => {
-                                            const result = this.assignGatheringTask(c.id);
+                                            const result = this.assignActivePregnancy(c.id);
                                             if (!result.success) {
-                                                this.myInternalState['taskMessage'] = result.message;
+                                                this.myInternalState['pregnancyMessage'] = result.message;
                                             }
                                             this.bumpVersion();
                                         }}
                                     >
-                                        Gather Mushrooms
+                                        Pregnant
                                     </button>
                                 )}
                             </div>
@@ -2767,6 +2824,7 @@ renderInner(): ReactElement {
         Simulate combat
     </button>
 </div>}
+        </div>
     </div>;
 }
 
