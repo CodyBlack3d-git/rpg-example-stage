@@ -779,9 +779,7 @@ const mergedCompanions: Companion[] = savedCompanions
             baseAbilities: fromRoster.baseAbilities ?? fromRoster.abilities,
             primaryStat: fromRoster.primaryStat,
             secondaryStat: fromRoster.secondaryStat,
-            moodImages: c.moodImages && Object.keys(c.moodImages).length > 0
-                ? c.moodImages
-                : fromRoster.moodImages,
+            moodImages: fromRoster.moodImages,
             bondLevel: c.bondLevel ?? 0,
             bondProgress: c.bondProgress ?? 0,
             mushroomCount: c.eggCount ?? 0,
@@ -877,9 +875,7 @@ this.myInternalState = {
                     baseAbilities: fromRoster.baseAbilities ?? fromRoster.abilities,
                     primaryStat: fromRoster.primaryStat,
                     secondaryStat: fromRoster.secondaryStat,
-                    moodImages: c.moodImages && Object.keys(c.moodImages).length > 0
-                        ? c.moodImages
-                        : fromRoster.moodImages,
+                    moodImages: fromRoster.moodImages,
                     bondLevel: c.bondLevel ?? 0,
                     bondProgress: c.bondProgress ?? 0,
                     mushroomCount: c.eggCount ?? 0,
@@ -1277,6 +1273,22 @@ Roll interpretation:
   * If a DC was set: [SUCCESS] meets/exceeds the bar; [FAILURE] falls short. Margins matter — beating DC by 10+ is a triumph; missing by 10+ is disastrous.
   * If no DC: total 1-5 poor, 6-10 middling with cost, 11-15 solid, 16-20 clean, 21+ exceptional.
   * Don't let dice override common sense. A natural 20 to lift a mountain still fails interestingly.
+
+Encounter scaling reference:
+Player tiers: level 1-4 = Tier 1, level 5-8 = Tier 2, level 9-12 = Tier 3, level 13+ = Tier 4.
+Current player level: ${player.level} (Tier ${player.level <= 4 ? 1 : player.level <= 8 ? 2 : player.level <= 12 ? 3 : 4})
+
+Encounter difficulty by tier gap:
+- Same tier: fair fight, outcome uncertain, skill and tactics matter.
+- One tier above player: significant challenge, retreat is a valid option.
+- Two tiers above player: direct combat is inadvisable, survival is success.
+- Three or more tiers above: effectively impossible, run.
+- One tier below player: manageable, low risk.
+- Two or more tiers below player: trivial, barely worth rolling.
+
+Each creature or threat has a tier noted in its lorebook entry. Use the gap between player tier and creature tier to calibrate how the encounter feels — pacing, tension, roll difficulty, and consequences of failure.
+
+Encounter rules:
 
 General rules:
 - Only include fields that changed.
