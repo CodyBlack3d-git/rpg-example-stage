@@ -54,36 +54,14 @@ type CharacterClass = {
 // Predefined classes. Add or modify entries here.
 const CHARACTER_CLASSES: {[id: string]: CharacterClass} = {
     ranger: {
-        id: 'ranger',
-        name: 'Ranger',
-        description: 'A wilderness scout — observant, light on their feet, more comfortable in trees than in courts.',
-        strengths: ['dex', 'wis'],
-        weaknesses: ['cha'],
-        traitName: 'Tracker',
-        traitDescription: 'Bonus to perception, tracking, and awareness rolls.',
-        traitTarget: 'perception',
-        traitPerLevels: 3
-    },
-    mystic: {
-        id: 'mystic',
-        name: 'Mystic',
-        description: 'A practitioner of inward magic — insightful and patient, but physically slight.',
-        strengths: ['wis'],
+        id: 'sovereign',
+        name: 'Sovereign',
+        description: 'Prophetized ruler of Aetheris - excels at leadership related skills and magic.',
+        strengths: ['int', 'cha'],
         weaknesses: ['str'],
-        traitName: 'Deep Well',
-        traitDescription: 'Extra max seed capacity beyond normal level scaling.',
-        traitTarget: 'maxSeeds',
-        traitPerLevels: 3
-    },
-    soldier: {
-        id: 'soldier',
-        name: 'Soldier',
-        description: 'A trained fighter — hardy and direct, suspicious of subtlety.',
-        strengths: ['str', 'con'],
-        weaknesses: ['int'],
-        traitName: 'Hardened',
-        traitDescription: 'Extra max HP beyond normal level scaling.',
-        traitTarget: 'maxHp',
+        traitName: 'Leader',
+        traitDescription: 'Bonus to diplomacy, negotiation, leadership rolls.',
+        traitTarget: 'social',
         traitPerLevels: 3
     },
 
@@ -92,6 +70,93 @@ const CHARACTER_CLASSES: {[id: string]: CharacterClass} = {
 // Cumulative XP cost for each level, starting at level 2.
 // Index 0 = XP needed to reach level 2, index 1 = level 3, etc.
 const LEVEL_XP_COSTS: number[] = [100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800];
+
+// Player learnable spell pool. The player gains a spell choice every 3 levels.
+// Each spell has a levelRequirement gating when it can first appear in offers.
+// Add or modify entries here.
+const PLAYER_SPELL_POOL: Spell[] = [
+    {
+        id: 'spark',
+        name: 'Spark',
+        description: 'A small jolt of energy — useful for lighting tinder, startling an animal, or jolting a lock open.',
+        mpCost: 1,
+        bondRequirement: 0,
+        levelRequirement: 1,
+        effectTags: ['utility']
+    },
+    {
+        id: 'mend',
+        name: 'Mend',
+        description: 'Closes shallow cuts and stabilizes minor wounds. Won\'t bring anyone back from the edge.',
+        mpCost: 2,
+        bondRequirement: 0,
+        levelRequirement: 1,
+        effectTags: ['heal']
+    },
+    {
+        id: 'soft_step',
+        name: 'Soft Step',
+        description: 'Muffles the player\'s footsteps and rustle of clothing for several minutes.',
+        mpCost: 2,
+        bondRequirement: 0,
+        levelRequirement: 3,
+        effectTags: ['stealth']
+    },
+    {
+        id: 'warding_sign',
+        name: 'Warding Sign',
+        description: 'A traced sigil that briefly hardens against one incoming blow. Single use, fades after.',
+        mpCost: 3,
+        bondRequirement: 0,
+        levelRequirement: 3,
+        effectTags: ['defense']
+    },
+    {
+        id: 'true_sight',
+        name: 'True Sight',
+        description: 'For a few moments, the player sees through illusion, glamour, and disguise.',
+        mpCost: 4,
+        bondRequirement: 0,
+        levelRequirement: 6,
+        effectTags: ['divination']
+    },
+    {
+        id: 'binding_word',
+        name: 'Binding Word',
+        description: 'A spoken word holds a single target in place for a few seconds. Works on creatures of equal or lesser tier.',
+        mpCost: 4,
+        bondRequirement: 0,
+        levelRequirement: 6,
+        effectTags: ['control']
+    },
+    {
+        id: 'ember_lash',
+        name: 'Ember Lash',
+        description: 'A whip of fire that strikes at short range, leaving searing burns.',
+        mpCost: 5,
+        bondRequirement: 0,
+        levelRequirement: 9,
+        effectTags: ['combat', 'fire']
+    },
+    {
+        id: 'far_sight',
+        name: 'Far Sight',
+        description: 'The player\'s vision extends to a place they have been before, for as long as concentration holds.',
+        mpCost: 5,
+        bondRequirement: 0,
+        levelRequirement: 9,
+        effectTags: ['divination']
+    },
+    {
+        id: 'aetheric_pulse',
+        name: 'Aetheric Pulse',
+        description: 'A wave of force radiating outward, knocking back enemies in close proximity.',
+        mpCost: 6,
+        bondRequirement: 0,
+        levelRequirement: 12,
+        effectTags: ['combat', 'force']
+    }
+];
 
 type RollRequest = {
     ability: string;
@@ -145,8 +210,7 @@ type Spell = {
 // State for an active spell-choice picker. Triggered when bond rises to a level
 // at which one or more new spells become available for the player to learn.
 type SpellChoice = {
-    companionId: string;        // which companion is teaching
-    bondLevel: number;          // bond level reached that triggered this
+    playerLevel: number;        // player level that triggered this offer
     candidates: Spell[];        // 3 random spells offered (or fewer if pool too small)
 };
 
@@ -297,14 +361,15 @@ const companionRoster: {[id: string]: Companion} = {
         name: 'Niri',
         mood: 'neutral',
         moodImages: {
-            neutral: '/characters/Niri_Neutralv2.gif',
-            laying_egg: '/characters/Niri/EggLaying.gif',
-            aroused: '/characters/Niri_Arousedv2.gif',
-            exhausted: '/characters/Niri_Exhausted.gif',
+            neutral: '/characters/Niri_Neutral.gif',
             flustered: '/characters/Niri_Flustered.gif',
-            satisfied: '/characters/Niri_Satisfied.gif',
-            embarrassed: '/characters/Niri_Embarrassed.gif',
-            flirty: '/characters/Niri_Flirty.gif'
+            laying_egg: '/characters/Niri/EggLaying.gif',
+            aroused: '/characters/Niri_Aroused.gif',
+            postorgasm: '/characters/Niri_Overstimulated.gif',
+            givingBlowjob: '/characters/Niri_GivingBlowjob.gif',
+            presenting: '/characters/Niri_Presenting.gif',
+            havingSex: '/characters/Niri_HavingSex.gif',
+            analSex: '/characters/Niri_AnalSex.gif'
         },
         description: 'A Halcyne Mystic. Naive but loyal. As a harpy, on even-numbered days her body produces an unfertilized clutch of 4-6 eggs - She may seem uncomfortable and restless until the eggs are layed.',
         isRoster: true,
@@ -675,6 +740,13 @@ const knownLocations: {[id: string]: Location} = {
         name: 'Last human crypt',
         image: '/Locations/loc_LostCrypt.png',
         description: 'A ruined crypt where Niri awoke Cody from his slumber',
+        isKnown: true
+    },
+    camp: {
+        id: 'camp',
+        name: 'Camp',
+        image: '/Locations/loc_camp.png',
+        description: 'The party makes camp for the evening.',
         isKnown: true
     },
     forest: {
@@ -1072,23 +1144,19 @@ formatStatsForPrompt(): string {
     const knownLocations: {[id: string]: Location} = this.myInternalState['knownLocations'];
     const inv = player.inventory.length === 0 ? 'empty' : player.inventory.join(', ');
 
-    // Build a lookup of all spells available across active companions, for tome display.
-    const allSpells: {[id: string]: {spell: Spell; teacherName: string}} = {};
-    for (const c of companions) {
-        if (!c.spellList) continue;
-        for (const s of c.spellList) {
-            allSpells[s.id] = {spell: s, teacherName: c.name};
-        }
+    // Build a lookup of player spells by id for tome display.
+    const playerSpellLookup: {[id: string]: Spell} = {};
+    for (const s of PLAYER_SPELL_POOL) {
+        playerSpellLookup[s.id] = s;
     }
-    // The tome: spells the player has learned. Look up by id.
+    // The tome: spells the player has learned. Look up by id from the pool.
     const tomeIds = player.tome ?? [];
     const tomeLines = tomeIds.length === 0
         ? '(empty — no spells learned yet)'
         : tomeIds.map(id => {
-            const entry = allSpells[id];
-            if (!entry) return `- ${id} (unknown — teacher not in party?)`;
-            const s = entry.spell;
-            return `- ${s.name} (id: ${s.id}, cost: ${s.mpCost}, taught by ${entry.teacherName}): ${s.description}`;
+            const s = playerSpellLookup[id];
+            if (!s) return `- ${id} (unknown spell)`;
+            return `- ${s.name} (id: ${s.id}, cost: ${s.mpCost} MP): ${s.description}`;
         }).join('\n');
 
     // For each companion, list which of their spells are available to *them* given current bond.
@@ -1096,10 +1164,9 @@ formatStatsForPrompt(): string {
     const companionSpellLines = companions
         .filter(c => c.isRoster && c.spellList && c.spellList.length > 0)
         .map(c => {
-            // Dual-gated: both bond level AND player level must be met.
+            // Level-gated only — bond no longer affects companion casting.
             const available = (c.spellList ?? []).filter(
-                s => s.bondRequirement <= (c.bondLevel ?? 0)
-                  && s.levelRequirement <= player.level
+                s => s.levelRequirement <= player.level
             );
             if (available.length === 0) return `- ${c.name}: (none yet)`;
             const list = available.map(s => `${s.name} (cost: ${s.mpCost})`).join(', ');
@@ -1123,7 +1190,7 @@ formatStatsForPrompt(): string {
             return `- ${c.name} (id: ${c.id}, mood: ${c.mood})${abilityStr}${bondStr}${unlocksStr}`;
         }).join('\n');
 
-    const validMoods = ['neutral', 'aroused', 'exhausted', 'flustered', 'satisfied', 'embarrassed', 'flirty', 'laying_egg'];
+    const validMoods = ['neutral', 'aroused', 'overstimulated', 'givingBlowjob', 'presenting', 'havingSex', 'analSex', 'laying_egg'];
     const knownLocationLines = Object.values(knownLocations)
         .map(l => `- ${l.name} (id: ${l.id})`)
         .join('\n');
@@ -1250,10 +1317,10 @@ Location:
 - Only emit when the party actually moves.
 
 Spell casting:
-- Companions cast their own spells from COMPANION SPELL ACCESS. Don't invent or repurpose.
-- Each companion has their own MP pool. Deduct via [STATE: companion.id.mp-=N] matching the spell's cost.
-- A companion with mp=0 cannot cast. Narrate the strain or empty reserves as character.
-- TOME shows what the player has learned through bond. Descriptive — companions cast regardless.
+- Companions cast their own spells from COMPANION SPELL ACCESS, using their own MP. Deduct via [STATE: companion.id.mp-=N].
+- The player casts spells from their TOME, using player MP. Deduct via [STATE: mp-=N] matching the spell's cost.
+- Neither player nor companion can cast if their MP is 0 or below the spell's cost. Narrate the strain or empty reserves as character.
+- Don't invent spells or use ones not in the lists. Don't have companions cast player spells or vice versa.
 - Don't cast unprompted in trivial moments. Save magic for stakes.
 
 Roll interpretation (when [ROLL] shows "Just resolved..."):
@@ -1625,32 +1692,23 @@ applyBondProgress(id: string, amount: number, reason: string): void {
         level++;
     }
 
-    const leveledUp = level > currentLevel;
     target.bondLevel = level;
     target.bondProgress = progress;
     console.log(`Stage: ${target.name} +${amount} bond (${reason}). Now level ${level}, ${progress}/${BOND_LEVEL_COSTS[level] ?? '—'} to next.`);
     this.myInternalState['activeCompanions'] = [...companions];
-
-    // On level-up, offer the player a spell choice if any are available at the new level.
-    if (leveledUp) {
-        this.offerSpellChoice(target);
-    }
 }
 
-// Build a SpellChoice for this companion if there are any unlearned spells
-// at or below their new bond level. Up to 3 are presented at random.
-offerSpellChoice(companion: Companion): void {
-    if (!companion.spellList || companion.spellList.length === 0) return;
+// Build a SpellChoice from the player's spell pool. Up to 3 eligible
+// unlearned spells are presented at random.
+offerPlayerSpellChoice(): void {
     const player: PlayerStats = this.myInternalState['player'];
     const learned = new Set(player.tome ?? []);
 
-    const eligible = companion.spellList.filter(
-        s => s.bondRequirement <= (companion.bondLevel ?? 0)
-          && s.levelRequirement <= player.level
-          && !learned.has(s.id)
+    const eligible = PLAYER_SPELL_POOL.filter(
+        s => s.levelRequirement <= player.level && !learned.has(s.id)
     );
     if (eligible.length === 0) {
-        console.log(`Stage: ${companion.name} bond up, but no new spells available.`);
+        console.log(`Stage: spell offer triggered, but no new spells available at level ${player.level}.`);
         return;
     }
 
@@ -1663,11 +1721,10 @@ offerSpellChoice(companion: Companion): void {
     const candidates = shuffled.slice(0, 3);
 
     this.myInternalState['spellChoice'] = {
-        companionId: companion.id,
-        bondLevel: companion.bondLevel ?? 0,
+        playerLevel: player.level,
         candidates
     };
-    console.log(`Stage: spell choice from ${companion.name} (${candidates.length} candidate${candidates.length === 1 ? '' : 's'}).`);
+    console.log(`Stage: player spell choice offered (${candidates.length} candidate${candidates.length === 1 ? '' : 's'}).`);
 }
 
 // Player picks one of the offered spells. Adds to tome, clears the choice.
@@ -1805,22 +1862,15 @@ checkLevelUp(): boolean {
         console.log(`Stage: leveled up to ${player.level}.`);
     }
     if (leveled) {
-        // Recompute and apply derived caps. Heal to new max as a level-up reward.
         const derived = this.computeDerivedStats(player.level, player.classId);
         player.maxHp = derived.maxHp;
         player.hp = player.maxHp;
         this.myInternalState['player'] = player;
-        // Flag for the AI's next turn to narrate the moment.
         this.myInternalState['justLeveled'] = true;
-        // Scale companion abilities to the new player level.
         this.scaleCompanionAbilities();
-        // Offer spell choices from each active companion at the new level.
-        const companions: Companion[] = this.myInternalState['activeCompanions'];
-        for (const companion of companions) {
-            if (companion.isRoster && companion.spellList && companion.spellList.length > 0) {
-                this.offerSpellChoice(companion);
-                if (this.myInternalState['spellChoice']) break;
-            }
+        // Offer a player spell choice every 2 levels (2, 4, 6, 8...).
+        if (player.level % 2 === 0) {
+            this.offerPlayerSpellChoice();
         }
     }
     return leveled;
@@ -2387,13 +2437,9 @@ renderInner(): ReactElement {
         {(() => {
             // Tome panel — shows learned spells with details.
             const tome = player.tome ?? [];
-            const companions = this.myInternalState['activeCompanions'] as Companion[];
-            const lookup: {[id: string]: {spell: Spell; teacherName: string}} = {};
-            for (const c of companions) {
-                if (!c.spellList) continue;
-                for (const s of c.spellList) {
-                    lookup[s.id] = {spell: s, teacherName: c.name};
-                }
+            const lookup: {[id: string]: Spell} = {};
+            for (const s of PLAYER_SPELL_POOL) {
+                lookup[s.id] = s;
             }
             return (
                 <div style={{marginTop: '12px'}}>
@@ -2402,13 +2448,13 @@ renderInner(): ReactElement {
                         ? <div style={{fontStyle: 'italic', color: '#777'}}>(empty)</div>
                         : <ul style={{margin: 0, paddingLeft: '20px', fontSize: '12px'}}>
                             {tome.map(id => {
-                                const entry = lookup[id];
-                                if (!entry) return <li key={id} style={{color: '#666'}}>{id} (unknown)</li>;
+                                const spell = lookup[id];
+                                if (!spell) return <li key={id} style={{color: '#666'}}>{id} (unknown)</li>;
                                 return (
-                                    <li key={id} title={entry.spell.description}>
-                                        <strong>{entry.spell.name}</strong>{' '}
+                                    <li key={id} title={spell.description}>
+                                        <strong>{spell.name}</strong>{' '}
                                         <span style={{fontSize: '10px', color: '#888'}}>
-                                            ({entry.spell.mpCost} seed{entry.spell.mpCost === 1 ? '' : 's'}, {entry.teacherName})
+                                            ({spell.mpCost} MP)
                                         </span>
                                     </li>
                                 );
@@ -2419,12 +2465,9 @@ renderInner(): ReactElement {
         })()}
 
         {(() => {
-            // Spell choice picker — shown only when a bond level-up just offered new spells.
+            // Spell choice picker — shown only when a player level milestone (every 3 levels) just offered new spells.
             const choice: SpellChoice | null = this.myInternalState['spellChoice'];
             if (!choice) return null;
-            const teacher = (this.myInternalState['activeCompanions'] as Companion[])
-                .find(c => c.id === choice.companionId);
-            const teacherName = teacher?.name ?? choice.companionId;
             return (
                 <div style={{
                     marginTop: '12px',
@@ -2434,7 +2477,7 @@ renderInner(): ReactElement {
                     background: 'rgba(40, 60, 90, 0.4)'
                 }}>
                     <div style={{fontSize: '13px', fontWeight: 'bold', color: '#ffd56b', marginBottom: '4px'}}>
-                        {teacherName} bond {choice.bondLevel} reached
+                        Level {choice.playerLevel} — new magic available
                     </div>
                     <div style={{fontSize: '11px', color: '#bbb', marginBottom: '8px', fontStyle: 'italic'}}>
                         Choose one spell to add to your tome:
@@ -2458,7 +2501,7 @@ renderInner(): ReactElement {
                                 <div style={{fontWeight: 'bold'}}>
                                     {spell.name}{' '}
                                     <span style={{color: '#888', fontWeight: 'normal'}}>
-                                        ({spell.mpCost} seed{spell.mpCost === 1 ? '' : 's'})
+                                        ({spell.mpCost} MP)
                                     </span>
                                 </div>
                                 <div style={{color: '#aaa', marginTop: '2px'}}>{spell.description}</div>
