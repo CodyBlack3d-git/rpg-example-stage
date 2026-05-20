@@ -81,80 +81,71 @@ const PLAYER_SPELL_POOL: Spell[] = [
         description: 'A small jolt of energy — useful for lighting tinder, startling an animal, or jolting a lock open.',
         mpCost: 1,
         bondRequirement: 0,
-        levelRequirement: 1,
+        levelRequirement: 2,
         effectTags: ['utility']
     },
     {
-        id: 'mend',
-        name: 'Mend',
-        description: 'Closes shallow cuts and stabilizes minor wounds. Won\'t bring anyone back from the edge.',
+        id: 'shield',
+        name: 'Shield',
+        description: 'Shimmering barrier deflects one attack, protecting you or an ally.',
         mpCost: 2,
         bondRequirement: 0,
-        levelRequirement: 1,
-        effectTags: ['heal']
-    },
-    {
-        id: 'soft_step',
-        name: 'Soft Step',
-        description: 'Muffles the player\'s footsteps and rustle of clothing for several minutes.',
-        mpCost: 2,
-        bondRequirement: 0,
-        levelRequirement: 3,
-        effectTags: ['stealth']
-    },
-    {
-        id: 'warding_sign',
-        name: 'Warding Sign',
-        description: 'A traced sigil that briefly hardens against one incoming blow. Single use, fades after.',
-        mpCost: 3,
-        bondRequirement: 0,
-        levelRequirement: 3,
+        levelRequirement: 2,
         effectTags: ['defense']
     },
     {
-        id: 'true_sight',
-        name: 'True Sight',
-        description: 'For a few moments, the player sees through illusion, glamour, and disguise.',
-        mpCost: 4,
+        id: 'detect_thoughts',
+        name: 'Detect Thoughts',
+        description: 'Sense surface emotions and intentions of nearby creatures for several minutes.',
+        mpCost: 3,
         bondRequirement: 0,
-        levelRequirement: 6,
-        effectTags: ['divination']
+        levelRequirement: 2,
+        effectTags: ['divination', 'mental']
     },
     {
-        id: 'binding_word',
-        name: 'Binding Word',
-        description: 'A spoken word holds a single target in place for a few seconds. Works on creatures of equal or lesser tier.',
-        mpCost: 4,
+        id: 'mage_hand',
+        name: 'Mage Hand',
+        description: 'Summon a magic hand that does the casters bidding for 1 hour',
+        mpCost: 3,
         bondRequirement: 0,
-        levelRequirement: 6,
-        effectTags: ['control']
+        levelRequirement: 4,
+        effectTags: ['conjuration']
     },
     {
-        id: 'ember_lash',
-        name: 'Ember Lash',
-        description: 'A whip of fire that strikes at short range, leaving searing burns.',
-        mpCost: 5,
+        id: 'fire_bolt',
+        name: 'Fire Bolt',
+        description: 'A bolt of fire shoots from the casters hand in a straight line. Does weak fire damage.',
+        mpCost: 2,
         bondRequirement: 0,
-        levelRequirement: 9,
+        levelRequirement: 4,
         effectTags: ['combat', 'fire']
     },
     {
-        id: 'far_sight',
-        name: 'Far Sight',
-        description: 'The player\'s vision extends to a place they have been before, for as long as concentration holds.',
-        mpCost: 5,
+        id: 'tongues',
+        name: 'Tongues',
+        description: 'Understand and speak any language for one hour, including beast speech.',
+        mpCost: 4,
         bondRequirement: 0,
-        levelRequirement: 9,
-        effectTags: ['divination']
+        levelRequirement: 4,
+        effectTags: ['utility', 'communication']
     },
     {
-        id: 'aetheric_pulse',
-        name: 'Aetheric Pulse',
-        description: 'A wave of force radiating outward, knocking back enemies in close proximity.',
+        id: 'summon_advisor',
+        name: 'Summon Advisor',
+        description: 'Call forth spectral counselor with knowledge of ancient Aetheris—answers three questions.',
+        mpCost: 5,
+        bondRequirement: 0,
+        levelRequirement: 6,
+        effectTags: ['divination', 'utility']
+    },
+    {
+        id: 'entangle',
+        name: 'Entangle',
+        description: 'Vines erupt from the ground to ensnare a target.',
         mpCost: 6,
         bondRequirement: 0,
-        levelRequirement: 12,
-        effectTags: ['combat', 'force']
+        levelRequirement: 6,
+        effectTags: ['nature']
     }
 ];
 
