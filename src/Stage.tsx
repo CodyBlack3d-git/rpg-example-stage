@@ -194,13 +194,12 @@ type Weather =
     | 'rain'
     | 'storm'
     | 'fog'
-    | 'hot';
+    | 'hot'
 
 const VALID_WEATHER: Weather[] = [
     'clear', 'overcast',
     'rain', 'storm',
-    'fog',
-    'hot'
+    'fog', 'hot'
 ];
 
 type Spell = {
@@ -2341,6 +2340,7 @@ renderInner(): ReactElement {
     const loc: Location = this.myInternalState['currentLocation'];
     if (!loc) return null;
     const ts: TimeState = this.myInternalState['timeState'];
+    const weather: Weather = this.myInternalState['weather'] ?? 'clear';
     return (
         <div style={{
             marginBottom: '12px',
@@ -2359,7 +2359,7 @@ renderInner(): ReactElement {
                 {!loc.isKnown && <span style={{fontSize: '10px', marginLeft: '6px', color: '#888'}}>(uncharted)</span>}
             </div>
             <div style={{fontSize: '11px', color: '#bbb', marginTop: '2px'}}>
-                Day {ts.day} · {ts.period.replace('_', ' ')}
+                Day {ts.day} · {ts.period.replace('_', ' ')} · {weather.replace('_', ' ')}
             </div>
         </div>
     );
