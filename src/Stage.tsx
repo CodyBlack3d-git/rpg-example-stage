@@ -814,15 +814,15 @@ const defaultPlayer: PlayerStats = {
     xp: 0,
     inventory: ['Rusty sword', 'Leather armor'],
     abilities: {
-        str: 12,
-        dex: 14,
+        str: 10,
+        dex: 10,
         con: 12,
-        int: 10,
+        int: 12,
         wis: 13,
-        cha: 11
+        cha: 14
     },
     tome: [],    // empty grimoire to start
-    classId: 'ranger',  // default class — player can change in chat 0
+    classId: 'Sovereign',  // default class — player can change in chat 0
     pendingAbilityPoint: false
 };
 
