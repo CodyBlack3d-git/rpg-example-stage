@@ -188,6 +188,21 @@ type TimeState = {
 // Periods in cycle order. Used to advance time and handle wrap-around.
 const TIME_PERIODS: TimePeriod[] = ['morning', 'midday', 'afternoon', 'evening', 'night', 'late_night'];
 
+type Weather =
+    | 'clear'
+    | 'overcast'
+    | 'rain'
+    | 'storm'
+    | 'fog'
+    | 'hot';
+
+const VALID_WEATHER: Weather[] = [
+    'clear', 'overcast',
+    'rain', 'storm',
+    'fog',
+    'hot'
+];
+
 type Spell = {
     id: string;              // globally unique, e.g. 'niri_healing_light'
     name: string;            // display name, e.g. 'Healing Light'
@@ -269,6 +284,7 @@ type MessageStateType = {
     spellChoice?: SpellChoice | null;
     timeState?: TimeState;
     worldState?: WorldState;
+    weather?: Weather;
 };
 
 type WorldState = {
@@ -882,6 +898,9 @@ this.myInternalState = {
     worldState: (messageState?.worldState && typeof messageState.worldState === 'object' && 'aetherPopulation' in messageState.worldState)
         ? messageState.worldState
         : {aetherPopulation: 0},
+    weather: (messageState?.weather && VALID_WEATHER.includes(messageState.weather))
+        ? messageState.weather
+        : 'clear',
     numUsers: Object.keys(users).length,
     numChars: Object.keys(characters).length
 };
@@ -979,7 +998,10 @@ this.myInternalState = {
                 : this.myInternalState['timeState'] ?? {day: 0, period: 'morning'},
             worldState: (state.worldState && typeof state.worldState === 'object' && 'aetherPopulation' in state.worldState)
                 ? state.worldState
-                : this.myInternalState['worldState'] ?? {aetherPopulation: 0}
+                : this.myInternalState['worldState'] ?? {aetherPopulation: 0},
+            weather: (state.weather && VALID_WEATHER.includes(state.weather))
+                ? state.weather
+                : this.myInternalState['weather'] ?? 'clear'
         };
 
         this.bumpVersion();
@@ -1228,6 +1250,10 @@ ${location.name} (id: ${location.id})
 Day ${(this.myInternalState['timeState'] as TimeState).day}, ${(this.myInternalState['timeState'] as TimeState).period.replace('_', ' ')}${(this.myInternalState['timeState'] as TimeState).day % 2 === 0 ? ' (even day)' : ' (odd day)'}
 [/CURRENT TIME]
 
+[CURRENT WEATHER]
+${(this.myInternalState['weather'] as Weather).replace('_', ' ')}
+[/CURRENT WEATHER]
+
 [KNOWN LOCATIONS]
 ${knownLocationLines}
 [/KNOWN LOCATIONS]
@@ -1302,6 +1328,13 @@ Optional tags (own line each, when applicable):
 - set=evening jumps directly (wraps to next day if backward).
 - Use time to color narration. Don't advance every turn — match what the scene earned.
 - Long rest auto-advances to next morning; don't combine with TIME tags.
+
+[WEATHER: set=<weather>]
+- Values: clear, overcast, rain, storm, fog, hot.
+- Weather should shift naturally over time — not every turn, but enough that the world feels alive. A fair day clouds over, rain stops, fog rolls in at dawn.
+- Use weather to color narration. 
+- Set weather when it changes. Don't re-set weather that hasn't changed.
+- Weather doesn't need to be dramatic. Most days are clear or cloudy. Save extreme weather for moments where it matters.
 
 Location:
 - location=<id or display name>. Known matches use full data; unknown becomes uncharted.
@@ -1478,12 +1511,38 @@ Encounters:
         workingText = workingText.replace(tag, '').trim();
     }
 
+    // Strip and apply any weather tags. Format: [WEATHER: set=light_rain]
+    const weatherRegex = /\[WEATHER:([^\]]*)\]/gi;
+    let weatherMatch: RegExpExecArray | null;
+    let appliedWeather = false;
+    const weatherMatches: string[] = [];
+    while ((weatherMatch = weatherRegex.exec(workingText)) !== null) {
+        weatherMatches.push(weatherMatch[0]);
+        const content = weatherMatch[1].trim();
+        const setMatch = content.match(/^set\s*=\s*(\w+)$/i);
+        if (setMatch) {
+            const target = setMatch[1].toLowerCase() as Weather;
+            if (VALID_WEATHER.includes(target)) {
+                this.myInternalState['weather'] = target;
+                appliedWeather = true;
+                console.log(`Stage: weather set to ${target}.`);
+            } else {
+                console.warn(`Stage: unknown weather "${target}"`);
+            }
+            continue;
+        }
+        console.warn('Stage: malformed WEATHER tag:', content);
+    }
+    for (const tag of weatherMatches) {
+        workingText = workingText.replace(tag, '').trim();
+    }
+
     // Then: find the state block in the (possibly stripped) text.
     const stateRegex = /\[STATE:([^\]]*)\]/i;
     const match = workingText.match(stateRegex);
 
     if (!match) {
-        return {cleanedText: workingText, applied: appliedRoll || appliedBond || appliedRest || appliedTime || appliedPop};
+        return {cleanedText: workingText, applied: appliedRoll || appliedBond || appliedRest || appliedTime || appliedPop || appliedWeather};
     }
 
     const stateContent = match[1].trim();
@@ -2176,7 +2235,8 @@ setTimePeriod(targetPeriod: TimePeriod): void {
                 rollState: this.myInternalState['rollState'],
                 spellChoice: this.myInternalState['spellChoice'],
                 timeState: this.myInternalState['timeState'],
-                worldState: this.myInternalState['worldState']
+                worldState: this.myInternalState['worldState'],
+                weather: this.myInternalState['weather']
             },
             /*** @type null | string @description If not null, the user's message itself is replaced
              with this value, both in what's sent to the LLM and in the database. ***/
@@ -2263,31 +2323,20 @@ renderInner(): ReactElement {
      return <div style={{
         width: '100%',
         minHeight: '100vh',
-        padding: '12px',
         fontFamily: 'system-ui, sans-serif',
         color: '#e0e0e0',
         boxSizing: 'border-box',
-        overflowY: 'auto',
         position: 'relative',
+        backgroundColor: '#1a1a25',
         backgroundImage: this.myInternalState['currentLocation']
-            ? `url(${(this.myInternalState['currentLocation'] as Location).image})`
+            ? `linear-gradient(rgba(15, 15, 25, 0.50), rgba(15, 15, 25, 0.59)), url(${(this.myInternalState['currentLocation'] as Location).image})`
             : 'none',
         backgroundSize: 'cover',
         backgroundPosition: 'center',
-        backgroundAttachment: 'fixed',
-        backgroundRepeat: 'no-repeat'
+        backgroundRepeat: 'no-repeat',
+        padding: '12px',
+        overflowY: 'auto'
     }}>
-        <div style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(15, 15, 25, 0.82)',
-            pointerEvents: 'none',
-            zIndex: 0
-        }}/>
-        <div style={{position: 'relative', zIndex: 1}}>
 {(() => {
     const loc: Location = this.myInternalState['currentLocation'];
     if (!loc) return null;
@@ -2858,8 +2907,7 @@ renderInner(): ReactElement {
         Simulate combat
     </button>
 </div>}
-        </div>
-    </div>;
+        </div>;
 }
 
 }
