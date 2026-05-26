@@ -202,6 +202,10 @@ const VALID_WEATHER: Weather[] = [
     'fog', 'hot'
 ];
 
+type GameMode = 'exploring' | 'combat' | 'camp';
+
+const VALID_MODES: GameMode[] = ['exploring', 'combat', 'camp'];
+
 type Spell = {
     id: string;              // globally unique, e.g. 'niri_healing_light'
     name: string;            // display name, e.g. 'Healing Light'
@@ -284,6 +288,7 @@ type MessageStateType = {
     timeState?: TimeState;
     worldState?: WorldState;
     weather?: Weather;
+    gameMode?: GameMode;
 };
 
 type WorldState = {
@@ -900,6 +905,9 @@ this.myInternalState = {
     weather: (messageState?.weather && VALID_WEATHER.includes(messageState.weather))
         ? messageState.weather
         : 'clear',
+    gameMode: (messageState?.gameMode && VALID_MODES.includes(messageState.gameMode))
+        ? messageState.gameMode
+        : 'exploring',
     numUsers: Object.keys(users).length,
     numChars: Object.keys(characters).length
 };
@@ -1000,7 +1008,10 @@ this.myInternalState = {
                 : this.myInternalState['worldState'] ?? {aetherPopulation: 0},
             weather: (state.weather && VALID_WEATHER.includes(state.weather))
                 ? state.weather
-                : this.myInternalState['weather'] ?? 'clear'
+                : this.myInternalState['weather'] ?? 'clear',
+            gameMode: (state.gameMode && VALID_MODES.includes(state.gameMode))
+                ? state.gameMode
+                : this.myInternalState['gameMode'] ?? 'exploring'
         };
 
         this.bumpVersion();
@@ -1253,6 +1264,17 @@ Day ${(this.myInternalState['timeState'] as TimeState).day}, ${(this.myInternalS
 ${(this.myInternalState['weather'] as Weather).replace('_', ' ')}
 [/CURRENT WEATHER]
 
+[CURRENT MODE]
+${this.myInternalState['gameMode']}
+[/CURRENT MODE]
+
+${(() => {
+    if (!this.myInternalState['modeChanged']) return '';
+    const prev = this.myInternalState['previousMode'];
+    const current = this.myInternalState['gameMode'];
+    return `[MODE CHANGE]\n** The party has just shifted from ${prev} mode to ${current} mode. Acknowledge this transition narratively — the pacing, focus, and rhythm of the scene should adjust accordingly. **\n[/MODE CHANGE]\n`;
+})()}
+
 [KNOWN LOCATIONS]
 ${knownLocationLines}
 [/KNOWN LOCATIONS]
@@ -1353,6 +1375,31 @@ Roll interpretation (when [ROLL] shows "Just resolved..."):
 - No DC: 1-5 poor, 6-10 middling, 11-15 solid, 16-20 clean, 21+ exceptional.
 - Common sense overrides dice. Natural 20 to lift a mountain still fails interestingly.
 - "Awaiting..." means you already asked — continue with suspense, do NOT narrate outcome, do NOT request another roll.
+
+Mode rules:
+The game is in one of three modes: exploring, combat, or camp.
+
+[MODE: set=combat]
+- Use when combat begins — a creature attacks, the party charges, violence becomes inevitable.
+- In combat: shorter responses, tighter pacing, more roll requests, narrate action moment-to-moment.
+- Time does not advance during combat (a fight is minutes; the time system tracks longer scales).
+- Don't end scenes in combat — keep tension building until the fight resolves.
+
+[MODE: set=camp]
+- Use when the party stops to rest somewhere safe — a defensible camp, an inn, a sanctuary.
+- In camp: longer breathing room, character moments, conversation. Lower stakes.
+- The player may trigger a long rest from camp; you may also do so narratively.
+- Time advances normally — a camp scene may cover hours.
+
+[MODE: set=exploring]
+- Default mode. Travel, discovery, casual scenes, social interaction with NPCs.
+- Use when transitioning back from combat or camp to normal play.
+
+Mode transition:
+- Emit [MODE: set=<mode>] on its own line when the mode genuinely changes.
+- Combat starts when violence is imminent or active. Combat ends when the fight resolves — victory, retreat, or de-escalation.
+- Camp starts when the party explicitly settles to rest. Camp ends when they break camp or leave.
+- Don't toggle modes for short interruptions. A brief skirmish during travel is still exploring with combat rolls. True combat mode is for sustained, focused fights.
 
 Encounter scaling:
 Tiers: 1 = lvl 1-4, 2 = lvl 5-8, 3 = lvl 9-12, 4 = lvl 13+.
@@ -1536,12 +1583,37 @@ Encounters:
         workingText = workingText.replace(tag, '').trim();
     }
 
+    // Strip and apply any mode tags. Format: [MODE: set=combat]
+    const modeRegex = /\[MODE:([^\]]*)\]/gi;
+    let modeMatch: RegExpExecArray | null;
+    let appliedMode = false;
+    const modeMatches: string[] = [];
+    while ((modeMatch = modeRegex.exec(workingText)) !== null) {
+        modeMatches.push(modeMatch[0]);
+        const content = modeMatch[1].trim();
+        const setMatch = content.match(/^set\s*=\s*(\w+)$/i);
+        if (setMatch) {
+            const target = setMatch[1].toLowerCase() as GameMode;
+            if (VALID_MODES.includes(target)) {
+                this.setGameMode(target);
+                appliedMode = true;
+            } else {
+                console.warn(`Stage: unknown mode "${target}"`);
+            }
+            continue;
+        }
+        console.warn('Stage: malformed MODE tag:', content);
+    }
+    for (const tag of modeMatches) {
+        workingText = workingText.replace(tag, '').trim();
+    }
+
     // Then: find the state block in the (possibly stripped) text.
     const stateRegex = /\[STATE:([^\]]*)\]/i;
     const match = workingText.match(stateRegex);
 
     if (!match) {
-        return {cleanedText: workingText, applied: appliedRoll || appliedBond || appliedRest || appliedTime || appliedPop || appliedWeather};
+        return {cleanedText: workingText, applied: appliedRoll || appliedBond || appliedRest || appliedTime || appliedPop || appliedWeather || appliedMode};
     }
 
     const stateContent = match[1].trim();
@@ -2069,6 +2141,19 @@ applyPopulationChange(amount: number, reason: string): void {
     console.log(`Stage: Aetheris population +${amount} (${reason}). Now ${newPop}.`);
 }
 
+setGameMode(mode: GameMode): void {
+    if (!VALID_MODES.includes(mode)) {
+        console.warn(`Stage: invalid mode "${mode}"`);
+        return;
+    }
+    const previous = this.myInternalState['gameMode'] as GameMode;
+    if (previous === mode) return;
+    this.myInternalState['gameMode'] = mode;
+    this.myInternalState['modeChanged'] = true;
+    this.myInternalState['previousMode'] = previous;
+    console.log(`Stage: mode changed from ${previous} to ${mode}.`);
+}
+
 longRest(): void {
     const player: PlayerStats = {...this.myInternalState['player']};
     const beforeHp = player.hp;
@@ -2116,7 +2201,13 @@ applyLocationChange(nameOrId: string): void {
 }
 
 // Advance time by N period steps. Handles wrap-around to next day.
+// During combat mode, time does not advance.
 advanceTimeBySteps(steps: number): void {
+    const mode: GameMode = this.myInternalState['gameMode'];
+    if (mode === 'combat') {
+        console.log(`Stage: time advancement suppressed during combat.`);
+        return;
+    }
     const ts: TimeState = this.myInternalState['timeState'];
     let dayDelta = 0;
     let idx = TIME_PERIODS.indexOf(ts.period);
@@ -2170,15 +2261,23 @@ setTimePeriod(targetPeriod: TimePeriod): void {
 } = userMessage;
 
         // Clear the just-leveled hint once the AI has seen it.
-        // We don't want it nagging on every subsequent turn.
         if (this.myInternalState['justLeveled']) {
-            // Was set last turn; the AI just saw it. Clear after this turn's prompt builds.
-            // We clear after building, so we move it from "set" to "shown" via a second flag.
             if (this.myInternalState['levelUpShown']) {
                 this.myInternalState['justLeveled'] = false;
                 this.myInternalState['levelUpShown'] = false;
             } else {
                 this.myInternalState['levelUpShown'] = true;
+            }
+        }
+
+        // Clear the mode change hint after the AI has seen it.
+        if (this.myInternalState['modeChanged']) {
+            if (this.myInternalState['modeChangeShown']) {
+                this.myInternalState['modeChanged'] = false;
+                this.myInternalState['modeChangeShown'] = false;
+                delete this.myInternalState['previousMode'];
+            } else {
+                this.myInternalState['modeChangeShown'] = true;
             }
         }
 
@@ -2235,7 +2334,8 @@ setTimePeriod(targetPeriod: TimePeriod): void {
                 spellChoice: this.myInternalState['spellChoice'],
                 timeState: this.myInternalState['timeState'],
                 worldState: this.myInternalState['worldState'],
-                weather: this.myInternalState['weather']
+                weather: this.myInternalState['weather'],
+                gameMode: this.myInternalState['gameMode']
             },
             /*** @type null | string @description If not null, the user's message itself is replaced
              with this value, both in what's sent to the LLM and in the database. ***/
@@ -2375,6 +2475,60 @@ renderInner(): ReactElement {
             );
         })()}
 
+        {(() => {
+            const mode = this.myInternalState['gameMode'] as GameMode;
+            const modeColors: {[k in GameMode]: string} = {
+                exploring: '#7aaeff',
+                combat: '#ff6b6b',
+                camp: '#aac46b'
+            };
+            const modeLabels: {[k in GameMode]: string} = {
+                exploring: 'Exploring',
+                combat: 'Combat',
+                camp: 'Camp'
+            };
+            return (
+                <div style={{
+                    marginBottom: '8px',
+                    padding: '6px 8px',
+                    background: 'rgba(0, 0, 0, 0.3)',
+                    borderRadius: '4px',
+                    borderLeft: `3px solid ${modeColors[mode]}`
+                }}>
+                    <div style={{
+                        fontSize: '11px',
+                        color: '#aaa',
+                        marginBottom: '4px'
+                    }}>
+                        Mode: <span style={{color: modeColors[mode], fontWeight: 'bold'}}>{modeLabels[mode]}</span>
+                    </div>
+                    <div style={{display: 'flex', gap: '4px', flexWrap: 'wrap'}}>
+                        {VALID_MODES.map(m => (
+                            <button
+                                key={m}
+                                style={{
+                                    fontSize: '10px',
+                                    padding: '3px 8px',
+                                    cursor: 'pointer',
+                                    background: m === mode ? modeColors[m] : '#2a2a2a',
+                                    color: m === mode ? '#000' : '#e0e0e0',
+                                    border: `1px solid ${modeColors[m]}`,
+                                    borderRadius: '3px',
+                                    fontWeight: m === mode ? 'bold' : 'normal'
+                                }}
+                                onClick={() => {
+                                    this.setGameMode(m);
+                                    this.bumpVersion();
+                                }}
+                            >
+                                {modeLabels[m]}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            );
+        })()}
+
         <div style={{display: 'flex', gap: '16px', flexWrap: 'wrap', marginBottom: '8px'}}>
             <div>HP: <span style={{color: '#ff6b6b'}}>{player.hp}/{player.maxHp}</span></div>
             <div>MP: <span style={{color: '#6bb6ff'}}>{player.mp}/{player.maxMp}</span></div>
@@ -2419,23 +2573,25 @@ renderInner(): ReactElement {
             </div>
         )}
 
-        <div style={{marginBottom: '8px'}}>
-            <button
-                style={{
-                    fontSize: '11px',
-                    padding: '4px 10px',
-                    cursor: 'pointer',
-                    background: '#2a3a2a',
-                    color: '#e0e0e0',
-                    border: '1px solid #4a5a4a',
-                    borderRadius: '3px'
-                }}
-                onClick={() => { this.longRest(); this.bumpVersion(); }}
-                title="Restore HP, MP, and seeds to maximum."
-            >
-                Long rest
-            </button>
-        </div>
+        {(this.myInternalState['gameMode'] as GameMode) !== 'combat' && (
+            <div style={{marginBottom: '8px'}}>
+                <button
+                    style={{
+                        fontSize: '11px',
+                        padding: '4px 10px',
+                        cursor: 'pointer',
+                        background: '#2a3a2a',
+                        color: '#e0e0e0',
+                        border: '1px solid #4a5a4a',
+                        borderRadius: '3px'
+                    }}
+                    onClick={() => { this.longRest(); this.bumpVersion(); }}
+                    title="Restore HP and MP to maximum."
+                >
+                    Long rest
+                </button>
+            </div>
+        )}
 
         <div style={{
             display: 'grid',
