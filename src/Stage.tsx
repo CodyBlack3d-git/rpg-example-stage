@@ -376,8 +376,7 @@ const companionRoster: {[id: string]: Companion} = {
             flustered: '/characters/Niri_Flustered.gif',
             laying_egg: '/characters/Niri/EggLaying.gif',
             aroused: '/characters/Niri_Aroused.gif',
-            postorgasm: '/characters/Niri_Overstimulated.gif',
-            givingBlowjob: '/characters/Niri_GivingBlowjob.gif',
+            givingBlowjob: '/characters/NiriBlowjob.gif',
             presenting: '/characters/Niri_Presenting.gif',
             havingSex: '/characters/Niri_HavingSex.gif',
             analSex: '/characters/Niri_AnalSex.gif'
