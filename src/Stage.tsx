@@ -374,7 +374,7 @@ const companionRoster: {[id: string]: Companion} = {
         moodImages: {
             neutral: '/characters/Niri_Neutral.gif',
             flustered: '/characters/Niri_Flustered.gif',
-            laying_egg: '/characters/Niri/EggLaying.gif',
+            laying_egg: '/characters/Niri/Niri_EggLaying.gif',
             aroused: '/characters/Niri_Aroused.gif',
             givingBlowjob: '/characters/NiriBlowjob.gif',
             presenting: '/characters/Niri_Presenting.gif',
