@@ -500,7 +500,7 @@ const companionRoster: {[id: string]: Companion} = {
             flirty: '/characters/Niri_Flirty.gif'
         },
         description: 'A Naga Shadow Dancer. Escaped ogre captivity thanks to ((user)), thinks self grotesque.',
-        isRoster: false,
+        isRoster: true,
         abilities: {
             str: 14,
             dex: 12,
@@ -565,7 +565,7 @@ const companionRoster: {[id: string]: Companion} = {
             flirty: '/characters/Niri_Flirty.gif'
         },
         description: 'Anubian Death Priestess. Meticulous, retiualistic, formal.',
-        isRoster: false,
+        isRoster: true,
         abilities: {
             str: 10,
             dex: 14,
@@ -630,7 +630,7 @@ const companionRoster: {[id: string]: Companion} = {
             flirty: '/characters/Niri_Flirty.gif'
         },
         description: 'High Elf Eldritch Knight. Graceful acedemic wearing a mischevious latex slime symbiote named Slip as a bodysuit.',
-        isRoster: false,
+        isRoster: true,
         abilities: {
             str: 11,
             dex: 15,
@@ -692,7 +692,7 @@ const companionRoster: {[id: string]: Companion} = {
             flirty: '/characters/Niri_Flirty.gif'
         },
         description: 'Lupari beast ranger. Carries herself with predators confidence, always has her dire wolf brother/lover by her side.',
-        isRoster: false,
+        isRoster: true,
         abilities: {
             str: 13,
             dex: 16,
@@ -1332,6 +1332,7 @@ Optional tags (own line each, when applicable):
 - When unlocked beats appear in ACTIVE COMPANIONS, weave them in organically.
 
 [TIME: advance=N] or [TIME: set=<period>]
+- This is a SEPARATE tag on its own line. NEVER put time inside [STATE: ...]. Wrong: [STATE: time=morning]. Right: [TIME: set=morning]
 - Periods: morning, midday, afternoon, evening, night, late_night.
 - advance=1 for travel between nearby places, 2+ for long journeys.
 - set=evening jumps directly (wraps to next day if backward).
@@ -2930,8 +2931,8 @@ renderInner(): ReactElement {
                         };
                         return (
                             <div style={{marginTop: '4px', textAlign: 'left'}}>
-                                <div style={{fontSize: '10px', color: '#888', marginBottom: '2px'}}>
-                                    Bond {lvl}/10 {cost ? `(${prog}/${cost})` : '(max)'}
+                                <div style={{fontSize: '11px', color: '#ccc', marginBottom: '3px', fontWeight: 'bold'}}>
+                                    Bond {lvl}/10 <span style={{fontWeight: 'normal', color: '#aaa'}}>{cost ? `(${prog}/${cost})` : '(max)'}</span>
                                 </div>
                                 <div style={{
                                     height: '4px',
