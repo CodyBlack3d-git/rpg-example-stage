@@ -851,9 +851,9 @@ const mergedPlayer: PlayerStats = savedPlayer
 const savedCompanions = messageState?.activeCompanions;
 const mergedCompanions: Companion[] = savedCompanions
     ? savedCompanions.map(c => {
-        if (!c.isRoster) return c;
         const fromRoster = companionRoster[c.id];
         if (!fromRoster) return c;
+        if (!fromRoster.isRoster && !c.isRoster) return c;
         const abilities = c.abilities ?? fromRoster.abilities;
         const intScore = abilities?.int ?? 10;
         const playerLevel = mergedPlayer.level;
@@ -861,6 +861,7 @@ const mergedCompanions: Companion[] = savedCompanions
         return {
             ...fromRoster,
             ...c,
+            isRoster: fromRoster.isRoster,
             abilities: c.abilities ?? fromRoster.abilities,
             baseAbilities: fromRoster.baseAbilities ?? fromRoster.abilities,
             primaryStat: fromRoster.primaryStat,
@@ -874,7 +875,7 @@ const mergedCompanions: Companion[] = savedCompanions
             socialUnlocks: c.socialUnlocks ?? fromRoster.socialUnlocks ?? [],
             spellList: fromRoster.spellList ?? [],
             maxMp,
-            mp: c.mp ?? maxMp  // preserve current MP on reload, but cap at new max below
+            mp: c.mp ?? maxMp
         };
     }).map(c => {
         // Clamp current MP to max after backfilling.
@@ -963,15 +964,16 @@ this.myInternalState = {
         const incomingCompanions = state.activeCompanions;
         const mergedCompanions: Companion[] = incomingCompanions
             ? incomingCompanions.map(c => {
-                if (!c.isRoster) return c;
                 const fromRoster = roster[c.id];
                 if (!fromRoster) return c;
+                if (!fromRoster.isRoster && !c.isRoster) return c;
                 const abilities = c.abilities ?? fromRoster.abilities;
                 const intScore = abilities?.int ?? 10;
                 const maxMp = computeCompanionMaxMp(intScore, mergedPlayer.level);
                 return {
                     ...fromRoster,
                     ...c,
+                    isRoster: fromRoster.isRoster,
                     abilities: c.abilities ?? fromRoster.abilities,
                     baseAbilities: fromRoster.baseAbilities ?? fromRoster.abilities,
                     primaryStat: fromRoster.primaryStat,
