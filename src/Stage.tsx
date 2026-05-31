@@ -491,7 +491,7 @@ const companionRoster: {[id: string]: Companion} = {
         name: 'Vess',
         mood: 'neutral',
         moodImages: {
-            neutral: '/characters/Niri_Neutral.gif',
+            neutral: '/characters/Vess_Neutral.png',
             aroused: '/characters/Niri_Aroused.gif',
             exhausted: '/characters/Niri_Exhausted.gif',
             flustered: '/characters/Niri_Flustered.gif',
